@@ -118,7 +118,24 @@ CREATE TABLE IF NOT EXISTS inventory (
     item_id UUID NOT NULL REFERENCES items(id),
     quantity INTEGER DEFAULT 1 CHECK (quantity > 0),
     equipped BOOLEAN DEFAULT false,
-    acquired_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    acquired_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (character_id, item_id)
+);
+
+-- Items sitting in a room until someone takes them
+CREATE TABLE IF NOT EXISTS room_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    item_id UUID NOT NULL REFERENCES items(id),
+    quantity INTEGER DEFAULT 1 CHECK (quantity > 0),
+    UNIQUE (room_id, item_id)
+);
+
+-- Repeatable fetch-and-return progress
+CREATE TABLE IF NOT EXISTS character_objectives (
+    character_id UUID PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+    deliveries INTEGER NOT NULL DEFAULT 0 CHECK (deliveries >= 0),
+    last_delivered_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Economic transactions
@@ -154,6 +171,8 @@ CREATE INDEX IF NOT EXISTS idx_characters_current_room ON characters(current_roo
 CREATE INDEX IF NOT EXISTS idx_rooms_type ON rooms(room_type);
 CREATE INDEX IF NOT EXISTS idx_inventory_character ON inventory(character_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_item ON inventory(item_id);
+CREATE INDEX IF NOT EXISTS idx_room_items_room ON room_items(room_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_items_name ON items(name);
 CREATE INDEX IF NOT EXISTS idx_transactions_from_char ON transactions(from_character_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_to_char ON transactions(to_character_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at);
@@ -293,6 +312,15 @@ INSERT INTO items (id, name, description, item_type, weight, value, properties) 
     0.1,
     5,
     '{"luck_bonus": 1, "trinket_type": "charm"}'::jsonb
+),
+(
+    uuid_generate_v4(),
+    'Misplaced Manifest',
+    'A water-stained harbor ledger listing which boats were supposed to arrive. The Town Crier will want this back.',
+    'quest',
+    0.2,
+    0,
+    '{"quest": true}'::jsonb
 );
 
 -- Create a basic NPC for the town square
@@ -307,6 +335,34 @@ INSERT INTO npcs (id, name, description, room_id, health, max_health, level, pro
     1,
     '{"friendly": true, "provides_info": true, "respawn": true}'::jsonb
 );
+
+INSERT INTO room_items (room_id, item_id, quantity)
+SELECT r.id, i.id, 1
+FROM rooms r
+JOIN items i ON i.name = 'Misplaced Manifest'
+WHERE r.name = 'Moonlit Docks'
+ON CONFLICT (room_id, item_id) DO NOTHING;
+
+INSERT INTO room_items (room_id, item_id, quantity)
+SELECT r.id, i.id, 1
+FROM rooms r
+JOIN items i ON i.name = 'Health Potion'
+WHERE r.name = 'The Prancing Pony Inn'
+ON CONFLICT (room_id, item_id) DO NOTHING;
+
+INSERT INTO room_items (room_id, item_id, quantity)
+SELECT r.id, i.id, 1
+FROM rooms r
+JOIN items i ON i.name = 'Rusty Sword'
+WHERE r.name = 'Market Lane'
+ON CONFLICT (room_id, item_id) DO NOTHING;
+
+INSERT INTO room_items (room_id, item_id, quantity)
+SELECT r.id, i.id, 1
+FROM rooms r
+JOIN items i ON i.name = 'Leather Armor'
+WHERE r.name = 'Market Lane'
+ON CONFLICT (room_id, item_id) DO NOTHING;
 
 -- Create admin user (password should be changed in production)
 -- Password hash for 'admin123' - CHANGE THIS IN PRODUCTION

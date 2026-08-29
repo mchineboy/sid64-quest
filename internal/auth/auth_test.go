@@ -2,6 +2,7 @@ package auth
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +140,28 @@ func TestAuthService_GetAuthURL(t *testing.T) {
 	// Assertions
 	expected := "https://example.com/auth?token=test-token-123"
 	assert.Equal(t, expected, url)
+}
+
+func TestAuthService_PairingChallenge(t *testing.T) {
+	cfg := &config.Config{Auth: config.AuthConfig{
+		TokenExpiry:   5 * time.Minute,
+		SessionExpiry: time.Hour,
+		BaseURL:       "https://mud.example/",
+	}}
+	authService := newTestAuthService(t, cfg)
+
+	token, code, err := authService.GenerateAuthChallenge("pairing-session")
+	require.NoError(t, err)
+	assert.Regexp(t, `^[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}$`, code)
+
+	resolved, err := authService.ResolvePairingCode(strings.ToLower(strings.ReplaceAll(code, "-", "")))
+	require.NoError(t, err)
+	assert.Equal(t, token, resolved)
+	assert.Equal(t, "https://mud.example/p/"+code, authService.GetPairingURL(code))
+	assert.Equal(t, "https://mud.example/pair", authService.GetPairingEntryURL())
+
+	_, err = authService.ResolvePairingCode("bad-code")
+	require.Error(t, err)
 }
 
 func TestAuthService_LinkTokenToSession(t *testing.T) {

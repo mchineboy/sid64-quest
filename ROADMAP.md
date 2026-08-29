@@ -27,24 +27,27 @@ The project is a working local vertical slice, not yet a game people can meaning
 
 **Exit condition met:** two people can create characters, meet in a room, move around, and talk.
 
-## 4. Persistent player loop — next
+## 4. Persistent player loop — complete
 
 - Persist location, inventory, health, stamina, and activity safely.
 - Implement items, take/drop/use, simple equipment, and a clear save-on-change policy.
 - Add a minimal NPC interaction and one repeatable non-combat objective.
 - Cover commands and database mutations with unit and integration tests.
 
-**Exit condition:** a player has a reason to log back in, and their progress survives a restart.
+**Exit condition met:** a player has a reason to log back in, and their progress survives a restart.
 
 ## 5. Private-alpha hardening
 
-- Replace tracked development credentials with documented bootstrap/secrets handling.
-- Add migrations instead of relying on a Compose init script.
-- Add HTTP rate limits, secure cookie/session handling where applicable, audit logging, and TLS behind a reverse proxy.
-- Add structured health/readiness endpoints, backups, error reporting, and a simple deployment runbook.
-- Run a small invited playtest, fix disconnect/reconnect and abuse cases, and instrument the paths people actually use.
+The first host is the Raspberry Pi 5 Tailscale machine **symptom-pi** (modeburner). Invited play goes over the tailnet. When the MUD is ready, it gets a public DNS name; Commodore/PETSCII remains a client connecting to that host, not a deployment target.
 
-**Exit condition:** a small invited group can play without the operator babysitting every login or restart.
+- Replace tracked development credentials with documented bootstrap/secrets handling on the Pi.
+- Add migrations instead of relying on a Compose init script.
+- Keep hostnames in configuration (`AUTH_BASE_URL`, bind addresses). Use MagicDNS for the tailnet alpha; switching to public DNS should not require a rewrite.
+- Keep the Pi image small: PostgreSQL, Redis, auth HTTP, and the telnet/PETSCII listeners. Do not require MongoDB or the monitoring Compose file.
+- Add HTTP rate limits, session handling, audit logging, health/readiness, TLS for the login page, and `pg_dump` backups that survive a power loss.
+- Run a small invited playtest over the tailnet, then fix disconnect/reconnect and abuse cases.
+
+**Exit condition:** a small invited group can play on the Pi without the operator babysitting every login or restart.
 
 ## 6. Expand only after the loop is fun
 

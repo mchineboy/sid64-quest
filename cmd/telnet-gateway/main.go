@@ -87,10 +87,13 @@ func main() {
 	}()
 
 	// Start periodic cleanup routines
+	shutdownCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runCleanupRoutines(authService, logger)
+		runCleanupRoutines(shutdownCtx, authService, logger)
 	}()
 
 	// Start telnet server
@@ -131,6 +134,12 @@ func main() {
 	if err := petsciiServer.Stop(); err != nil {
 		logger.WithError(err).Error("Error stopping PETSCII telnet server")
 	}
+
+	// Release the background workers before waiting on them: the cleanup loop
+	// watches this context and the Redis subscriber only returns once the bus
+	// is closed.
+	stopBackground()
+	eventBus.Close()
 
 	// Wait for background goroutines to finish
 	done := make(chan struct{})
@@ -217,12 +226,14 @@ func handleGlobalEvent(logger *logrus.Logger) func(*events.Event) {
 }
 
 // runCleanupRoutines runs periodic cleanup tasks
-func runCleanupRoutines(authService *auth.AuthService, logger *logrus.Logger) {
+func runCleanupRoutines(ctx context.Context, authService *auth.AuthService, logger *logrus.Logger) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
 			logger.Debug("Running cleanup routines")
 

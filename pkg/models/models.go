@@ -8,14 +8,14 @@ import (
 
 // User represents a user account
 type User struct {
-	ID          uuid.UUID              `json:"id" db:"id"`
-	Username    string                 `json:"username" db:"username"`
-	Email       string                 `json:"email" db:"email"`
-	PasswordHash string                `json:"-" db:"password_hash"`
-	CreatedAt   time.Time              `json:"created_at" db:"created_at"`
-	LastLogin   *time.Time             `json:"last_login" db:"last_login"`
-	IsActive    bool                   `json:"is_active" db:"is_active"`
-	Permissions map[string]interface{} `json:"permissions" db:"permissions"`
+	ID           uuid.UUID              `json:"id" db:"id"`
+	Username     string                 `json:"username" db:"username"`
+	Email        string                 `json:"email" db:"email"`
+	PasswordHash string                 `json:"-" db:"password_hash"`
+	CreatedAt    time.Time              `json:"created_at" db:"created_at"`
+	LastLogin    *time.Time             `json:"last_login" db:"last_login"`
+	IsActive     bool                   `json:"is_active" db:"is_active"`
+	Permissions  map[string]interface{} `json:"permissions" db:"permissions"`
 }
 
 // Character represents a player character
@@ -36,6 +36,7 @@ type Character struct {
 	LastRest        time.Time  `json:"last_rest" db:"last_rest"`
 	IsSleeping      bool       `json:"is_sleeping" db:"is_sleeping"`
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	Deliveries      int        `json:"deliveries,omitempty"`
 }
 
 // Room represents a location in the game world
@@ -83,16 +84,16 @@ type InventoryItem struct {
 
 // Transaction represents an economic transaction
 type Transaction struct {
-	ID               uuid.UUID  `json:"id" db:"id"`
-	FromCharacterID  *uuid.UUID `json:"from_character_id" db:"from_character_id"`
-	ToCharacterID    *uuid.UUID `json:"to_character_id" db:"to_character_id"`
-	ItemID           *uuid.UUID `json:"item_id" db:"item_id"`
-	GoldAmount       int64      `json:"gold_amount" db:"gold_amount"`
-	TransactionType  string     `json:"transaction_type" db:"transaction_type"` // sale, gift, auction, etc.
-	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
-	FromCharacter    *Character `json:"from_character,omitempty"` // Populated via JOIN
-	ToCharacter      *Character `json:"to_character,omitempty"`   // Populated via JOIN
-	Item             *Item      `json:"item,omitempty"`           // Populated via JOIN
+	ID              uuid.UUID  `json:"id" db:"id"`
+	FromCharacterID *uuid.UUID `json:"from_character_id" db:"from_character_id"`
+	ToCharacterID   *uuid.UUID `json:"to_character_id" db:"to_character_id"`
+	ItemID          *uuid.UUID `json:"item_id" db:"item_id"`
+	GoldAmount      int64      `json:"gold_amount" db:"gold_amount"`
+	TransactionType string     `json:"transaction_type" db:"transaction_type"` // sale, gift, auction, etc.
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	FromCharacter   *Character `json:"from_character,omitempty"` // Populated via JOIN
+	ToCharacter     *Character `json:"to_character,omitempty"`   // Populated via JOIN
+	Item            *Item      `json:"item,omitempty"`           // Populated via JOIN
 }
 
 // Auction represents an auction house listing
@@ -106,8 +107,8 @@ type Auction struct {
 	EndsAt          time.Time  `json:"ends_at" db:"ends_at"`
 	Status          string     `json:"status" db:"status"` // active, completed, cancelled
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
-	Seller          *Character `json:"seller,omitempty"`          // Populated via JOIN
-	Item            *Item      `json:"item,omitempty"`            // Populated via JOIN
+	Seller          *Character `json:"seller,omitempty"`         // Populated via JOIN
+	Item            *Item      `json:"item,omitempty"`           // Populated via JOIN
 	CurrentBidder   *Character `json:"current_bidder,omitempty"` // Populated via JOIN
 }
 
@@ -271,7 +272,7 @@ func (i *Item) CanUse(character *Character) bool {
 			}
 		}
 	}
-	
+
 	if goodReq, exists := i.AlignmentRequired["good"]; exists {
 		if goodMin, ok := goodReq.(map[string]interface{})["min"]; ok {
 			if character.AlignmentGood < int(goodMin.(float64)) {
@@ -284,7 +285,7 @@ func (i *Item) CanUse(character *Character) bool {
 			}
 		}
 	}
-	
+
 	return true
 }
 

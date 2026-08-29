@@ -105,6 +105,12 @@ func NewFormatter(enabled bool) *Formatter {
 	return &Formatter{enabled: enabled}
 }
 
+// Enabled reports whether the client accepts ANSI escape sequences. Callers
+// that depend on colour for meaning, rather than decoration, must check this.
+func (f *Formatter) Enabled() bool {
+	return f.enabled
+}
+
 // Format applies ANSI formatting to text
 func (f *Formatter) Format(text string, style Style) string {
 	if !f.enabled {

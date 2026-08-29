@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,8 @@ import (
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
+
+var pairingEncoding = base32.NewEncoding("0123456789ABCDEFGHJKMNPQRSTVWXYZ").WithPadding(base32.NoPadding)
 
 // AuthService handles authentication and session management
 type AuthService struct {
@@ -96,6 +99,60 @@ func (as *AuthService) GenerateAuthToken(sessionID string) (string, error) {
 	}).Debug("Generated auth token")
 
 	return token, nil
+}
+
+// GenerateAuthChallenge creates the internal authentication token plus a short
+// one-time code that can be typed from a phone or encoded in a small QR code.
+func (as *AuthService) GenerateAuthChallenge(sessionID string) (string, string, error) {
+	token, err := as.GenerateAuthToken(sessionID)
+	if err != nil {
+		return "", "", err
+	}
+
+	for attempt := 0; attempt < 5; attempt++ {
+		random := make([]byte, 5)
+		if _, err := rand.Read(random); err != nil {
+			return "", "", fmt.Errorf("generate pairing code: %w", err)
+		}
+		rawCode := pairingEncoding.EncodeToString(random)
+		key := "pairing_code:" + rawCode
+		stored, err := as.redis.SetNX(context.Background(), key, token, as.config.Auth.TokenExpiry).Result()
+		if err != nil {
+			return "", "", fmt.Errorf("store pairing code: %w", err)
+		}
+		if stored {
+			return token, formatPairingCode(rawCode), nil
+		}
+	}
+
+	return "", "", fmt.Errorf("could not allocate a unique pairing code")
+}
+
+// ResolvePairingCode returns the internal token for a short one-time code.
+func (as *AuthService) ResolvePairingCode(code string) (string, error) {
+	normalized := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
+	if len(normalized) != 8 {
+		return "", fmt.Errorf("invalid pairing code")
+	}
+
+	token, err := as.redis.Get(context.Background(), "pairing_code:"+normalized).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", fmt.Errorf("invalid or expired pairing code")
+		}
+		return "", fmt.Errorf("retrieve pairing code: %w", err)
+	}
+	if _, err := as.ValidateAuthToken(token); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func formatPairingCode(code string) string {
+	if len(code) != 8 {
+		return code
+	}
+	return code[:4] + "-" + code[4:]
 }
 
 // ValidateAuthToken validates an authentication token and returns the session ID
@@ -557,4 +614,14 @@ func (as *AuthService) CleanupExpiredSessions() error {
 // GetAuthURL generates the authentication URL for a token
 func (as *AuthService) GetAuthURL(token string) string {
 	return fmt.Sprintf("%s/auth?token=%s", as.config.Auth.BaseURL, token)
+}
+
+// GetPairingURL returns the short browser URL displayed by terminal clients.
+func (as *AuthService) GetPairingURL(code string) string {
+	return fmt.Sprintf("%s/p/%s", strings.TrimRight(as.config.Auth.BaseURL, "/"), code)
+}
+
+// GetPairingEntryURL returns the fixed page where a player can type the code.
+func (as *AuthService) GetPairingEntryURL() string {
+	return strings.TrimRight(as.config.Auth.BaseURL, "/") + "/pair"
 }

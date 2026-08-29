@@ -16,6 +16,7 @@ import (
 
 	"github.com/tylerhardison/race-condition-kingdom/internal/auth"
 	"github.com/tylerhardison/race-condition-kingdom/internal/database"
+	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 )
 
@@ -47,6 +48,17 @@ type registerPageData struct {
 	CharacterName string
 }
 
+type authPageData struct {
+	Token    string
+	Error    string
+	Username string
+}
+
+type pairingPageData struct {
+	Code  string
+	Error string
+}
+
 func main() {
 	// Initialize logger
 	logger := logrus.New()
@@ -62,6 +74,11 @@ func main() {
 		logger.WithError(err).Fatal("Failed to initialize database")
 	}
 	defer db.Close()
+
+	worldService := game.NewWorldService(db.GetPostgreSQLDB())
+	if err := worldService.EnsureStarterWorld(context.Background()); err != nil {
+		logger.WithError(err).Fatal("Failed to initialize starter world")
+	}
 
 	// Initialize auth service
 	authService := auth.NewAuthService(db.GetPostgreSQLDB(), db.GetRedisClient(), cfg, logger)
@@ -81,6 +98,9 @@ func main() {
 	router := mux.NewRouter()
 
 	// Authentication routes
+	router.HandleFunc("/p/{code}", handler.handlePairingCode).Methods("GET")
+	router.HandleFunc("/pair", handler.handlePairingPage).Methods("GET")
+	router.HandleFunc("/pair", handler.handlePairingSubmit).Methods("POST")
 	router.HandleFunc("/auth", handler.handleAuthPage).Methods("GET")
 	router.HandleFunc("/auth", handler.handleAuthSubmit).Methods("POST")
 	router.HandleFunc("/register", handler.handleRegisterPage).Methods("GET")
@@ -123,6 +143,44 @@ func main() {
 	}
 
 	logger.Info("Auth service stopped")
+}
+
+func (h *AuthHandler) handlePairingCode(w http.ResponseWriter, r *http.Request) {
+	code := mux.Vars(r)["code"]
+	token, err := h.authService.ResolvePairingCode(code)
+	if err != nil {
+		h.logger.WithError(err).Info("Invalid pairing code")
+		http.Error(w, "Invalid or expired pairing code", http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, h.authService.GetAuthURL(token), http.StatusSeeOther)
+}
+
+func (h *AuthHandler) handlePairingPage(w http.ResponseWriter, _ *http.Request) {
+	h.renderPairingPage(w, pairingPageData{})
+}
+
+func (h *AuthHandler) handlePairingSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+	data := pairingPageData{Code: r.FormValue("code")}
+	token, err := h.authService.ResolvePairingCode(data.Code)
+	if err != nil {
+		data.Error = "Invalid or expired pairing code."
+		h.renderPairingPage(w, data)
+		return
+	}
+	http.Redirect(w, r, h.authService.GetAuthURL(token), http.StatusSeeOther)
+}
+
+func (h *AuthHandler) renderPairingPage(w http.ResponseWriter, data pairingPageData) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := h.templates.ExecuteTemplate(w, "pair.html", data); err != nil {
+		h.logger.WithError(err).Error("Failed to render pairing page")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 func (h *AuthHandler) handleRegisterPage(w http.ResponseWriter, r *http.Request) {
@@ -202,24 +260,14 @@ func (h *AuthHandler) handleAuthPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate token exists and get session info
-	sessionID, err := h.authService.ValidateAuthToken(token)
-	if err != nil {
+	if _, err := h.authService.ValidateAuthToken(token); err != nil {
 		h.logger.WithError(err).Warn("Invalid auth token")
 		http.Error(w, "Invalid or expired authentication token", http.StatusBadRequest)
 		return
 	}
 
-	// Render authentication form
-	data := struct {
-		Token     string
-		SessionID string
-	}{
-		Token:     token,
-		SessionID: sessionID,
-	}
-
 	w.Header().Set("Content-Type", "text/html")
-	if err := h.templates.ExecuteTemplate(w, "auth.html", data); err != nil {
+	if err := h.templates.ExecuteTemplate(w, "auth.html", authPageData{Token: token}); err != nil {
 		h.logger.WithError(err).Error("Failed to render auth template")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -255,19 +303,12 @@ func (h *AuthHandler) handleAuthSubmit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.WithError(err).Info("Authentication failed")
 
-		// Render error page
-		data := struct {
-			Token    string
-			Error    string
-			Username string
-		}{
+		w.Header().Set("Content-Type", "text/html")
+		if err := h.templates.ExecuteTemplate(w, "auth.html", authPageData{
 			Token:    token,
 			Error:    "Invalid username or password",
 			Username: username,
-		}
-
-		w.Header().Set("Content-Type", "text/html")
-		if err := h.templates.ExecuteTemplate(w, "auth.html", data); err != nil {
+		}); err != nil {
 			h.logger.WithError(err).Error("Failed to render auth template with error")
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
@@ -549,6 +590,37 @@ func (h *AuthHandler) loadTemplates() error {
 </body>
 </html>`
 
+	pairingTemplate := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pair Terminal - Race Condition Kingdom</title>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: #000; padding: 30px; border: 2px solid #00ff00; border-radius: 10px; }
+        .title { text-align: center; color: #ffff00; margin-bottom: 25px; font-size: 24px; }
+        label { display: block; margin-bottom: 8px; color: #00ffff; }
+        input { box-sizing: border-box; width: 100%; padding: 14px; background: #333; border: 1px solid #666; color: #fff; font: 24px 'Courier New', monospace; text-transform: uppercase; letter-spacing: 3px; }
+        button { margin-top: 18px; background: #00ff00; color: #000; padding: 12px 30px; border: none; cursor: pointer; font-family: inherit; font-weight: bold; }
+        .error { color: #ff8080; margin-bottom: 16px; padding: 10px; border: 1px solid #ff0000; background: #330000; }
+        .info { color: #ffff00; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">PAIR YOUR TERMINAL</div>
+        <div class="info">Enter the eight-character code shown by the game.</div>
+        {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+        <form method="POST" action="/pair">
+            <label for="code">Pairing code</label>
+            <input id="code" name="code" value="{{.Code}}" placeholder="ABCD-EFGH" autocomplete="one-time-code" autocapitalize="characters" required autofocus>
+            <button type="submit">CONTINUE</button>
+        </form>
+    </div>
+</body>
+</html>`
+
 	templates, err := template.New("auth.html").Parse(authTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse templates: %w", err)
@@ -558,6 +630,9 @@ func (h *AuthHandler) loadTemplates() error {
 	}
 	if _, err := templates.New("register.html").Parse(registerTemplate); err != nil {
 		return fmt.Errorf("failed to parse registration template: %w", err)
+	}
+	if _, err := templates.New("pair.html").Parse(pairingTemplate); err != nil {
+		return fmt.Errorf("failed to parse pairing template: %w", err)
 	}
 
 	h.templates = templates

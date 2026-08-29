@@ -102,6 +102,9 @@ func (ws *WorldService) EnsureStarterWorld(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE characters SET current_room_id = $1 WHERE current_room_id IS NULL`, ids["Town Square"]); err != nil {
 		return fmt.Errorf("place unlocated characters: %w", err)
 	}
+	if err := ensurePersistentLoop(ctx, tx, ids); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit starter world setup: %w", err)
 	}
@@ -134,37 +137,74 @@ func (ws *WorldService) GetRoom(ctx context.Context, roomID uuid.UUID) (*models.
 	return &room, nil
 }
 
-func (ws *WorldService) MoveCharacter(ctx context.Context, characterID uuid.UUID, direction string) (*models.Room, *models.Room, error) {
+func (ws *WorldService) MoveCharacter(ctx context.Context, characterID uuid.UUID, direction string) (*models.Room, *models.Room, int, error) {
+	direction = NormalizeDirection(direction)
+	if direction == "" {
+		return nil, nil, 0, fmt.Errorf("that is not a direction")
+	}
+
 	tx, err := ws.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("begin movement: %w", err)
+		return nil, nil, 0, fmt.Errorf("begin movement: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var currentRoomID uuid.UUID
-	if err := tx.QueryRowContext(ctx, `SELECT current_room_id FROM characters WHERE id = $1 FOR UPDATE`, characterID).Scan(&currentRoomID); err != nil {
-		return nil, nil, fmt.Errorf("load character location: %w", err)
+	var stamina int
+	if err := tx.QueryRowContext(ctx, `SELECT current_room_id, stamina FROM characters WHERE id = $1 FOR UPDATE`, characterID).Scan(&currentRoomID, &stamina); err != nil {
+		return nil, nil, 0, fmt.Errorf("load character location: %w", err)
 	}
 
 	from, err := ws.getRoomTx(ctx, tx, currentRoomID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	nextRoomID, exists := from.Exits[direction]
 	if !exists || nextRoomID == uuid.Nil {
-		return from, nil, fmt.Errorf("there is no exit %s from here", direction)
+		return from, nil, stamina, fmt.Errorf("there is no exit %s from here", direction)
 	}
 	to, err := ws.getRoomTx(ctx, tx, nextRoomID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE characters SET current_room_id = $1 WHERE id = $2`, to.ID, characterID); err != nil {
-		return nil, nil, fmt.Errorf("save character location: %w", err)
+	stamina -= moveStaminaCost
+	if stamina < 0 {
+		stamina = 0
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE characters SET current_room_id = $1, stamina = $2 WHERE id = $3`, to.ID, stamina, characterID); err != nil {
+		return nil, nil, 0, fmt.Errorf("save character location: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, fmt.Errorf("commit movement: %w", err)
+		return nil, nil, 0, fmt.Errorf("commit movement: %w", err)
 	}
-	return from, to, nil
+	return from, to, stamina, nil
+}
+
+func (ws *WorldService) LoadCharacter(ctx context.Context, characterID uuid.UUID) (*models.Character, error) {
+	var char models.Character
+	var currentRoomID sql.NullString
+	if err := ws.db.QueryRowContext(ctx, `
+		SELECT c.id, c.user_id, c.name, c.level, c.experience, c.health, c.max_health,
+		       c.stamina, c.max_stamina, c.gold, c.alignment_lawful, c.alignment_good,
+		       c.current_room_id, c.last_rest, c.is_sleeping, c.created_at,
+		       COALESCE(o.deliveries, 0)
+		FROM characters c
+		LEFT JOIN character_objectives o ON o.character_id = c.id
+		WHERE c.id = $1`, characterID).Scan(
+		&char.ID, &char.UserID, &char.Name, &char.Level, &char.Experience,
+		&char.Health, &char.MaxHealth, &char.Stamina, &char.MaxStamina, &char.Gold,
+		&char.AlignmentLawful, &char.AlignmentGood, &currentRoomID, &char.LastRest,
+		&char.IsSleeping, &char.CreatedAt, &char.Deliveries,
+	); err != nil {
+		return nil, fmt.Errorf("load character: %w", err)
+	}
+	if currentRoomID.Valid {
+		roomID, err := uuid.Parse(currentRoomID.String)
+		if err == nil {
+			char.CurrentRoomID = &roomID
+		}
+	}
+	return &char, nil
 }
 
 func (ws *WorldService) getRoomTx(ctx context.Context, tx *sql.Tx, roomID uuid.UUID) (*models.Room, error) {

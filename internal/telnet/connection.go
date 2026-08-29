@@ -16,6 +16,7 @@ const (
 	telnetIAC   = 255
 	telnetWILL  = 251
 	telnetDO    = 253
+	telnetECHO  = 1
 	telnetSB    = 250
 	telnetSE    = 240
 	telnetTTYPE = 24
@@ -23,15 +24,17 @@ const (
 	ttypeSEND   = 1
 )
 
-// ReadLine reads a line of input from the connection
+// ReadLine reads a line of input from the connection. The deadline bounds how
+// long the player may stay idle, not how long a single read may take, so it
+// must cover the time a user spends reading the screen or signing in elsewhere.
 func (c *Connection) ReadLine() (string, error) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	idle := c.IdleTimeout
+	if idle <= 0 {
+		idle = 15 * time.Minute
+	}
+	c.Conn.SetReadDeadline(time.Now().Add(idle))
 
-	// Set read deadline
-	c.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-
-	var line strings.Builder
+	var line []byte
 	for {
 		character, err := c.readApplicationByte()
 		if err != nil {
@@ -40,16 +43,69 @@ func (c *Connection) ReadLine() (string, error) {
 
 		switch character {
 		case '\n':
-			return strings.TrimSpace(line.String()), nil
-		case '\r':
-			if next, err := c.Reader.Peek(1); err == nil && next[0] == '\n' {
-				_, _ = c.Reader.ReadByte()
+			if err := c.echoPETSCIIByte('\r'); err != nil {
+				return "", err
 			}
-			return strings.TrimSpace(line.String()), nil
+			return strings.TrimSpace(string(line)), nil
+		case '\r':
+			// Commodore clients commonly send CR without LF. Peeking an empty
+			// socket would block until the full read deadline, so only consume
+			// LF when it is already buffered.
+			if c.Reader.Buffered() > 0 {
+				if next, err := c.Reader.Peek(1); err == nil && next[0] == '\n' {
+					_, _ = c.Reader.ReadByte()
+				}
+			}
+			if err := c.echoPETSCIIByte('\r'); err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(string(line)), nil
+		case '\b', 0x14, 0x7f:
+			if len(line) > 0 {
+				line = line[:len(line)-1]
+				if err := c.echoPETSCIIByte(0x14); err != nil {
+					return "", err
+				}
+			}
 		default:
-			line.WriteByte(c.petsciiInputByte(character))
+			line = append(line, c.petsciiInputByte(character))
+			if err := c.echoPETSCIIByte(character); err != nil {
+				return "", err
+			}
 		}
 	}
+}
+
+// EnableServerEcho tells a negotiated telnet client that this server will echo
+// typed characters. The dedicated PETSCII listener is raw-friendly and skips
+// telnet negotiation, but still echoes bytes in ReadLine.
+func (c *Connection) EnableServerEcho() error {
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
+
+	if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
+	if _, err := c.Writer.Write([]byte{telnetIAC, telnetWILL, telnetECHO}); err != nil {
+		return err
+	}
+	return c.Writer.Flush()
+}
+
+func (c *Connection) echoPETSCIIByte(character byte) error {
+	if c.Presentation != PresentationPETSCII {
+		return nil
+	}
+
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
+	if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
+	if err := c.Writer.WriteByte(character); err != nil {
+		return err
+	}
+	return c.Writer.Flush()
 }
 
 // SendMessage sends a message to the connection
@@ -105,13 +161,28 @@ func (c *Connection) SendWelcome() error {
 }
 
 // SendAuthInstructions sends authentication instructions
-func (c *Connection) SendAuthInstructions(authURL string) error {
+func (c *Connection) SendAuthInstructions(authURL, entryURL, pairingCode string) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petsciiAuthInstructions(entryURL, pairingCode))
+	}
+
+	var scan string
+	if c.Formatter.Enabled() {
+		// A QR code is decoration if it fails to render; the URL and pairing
+		// code below are the paths that must always work.
+		if qr, err := ansiQRCode(authURL, 78); err == nil {
+			scan = "\r\n" + qr
+		}
+	}
+
 	instructions := fmt.Sprintf(`
 %s
-
-To complete your login, please visit the following URL in your web browser:
+%s
+Open this URL:
 
 %s
+
+Pairing code: %s
 
 %s
 
@@ -119,7 +190,9 @@ Once you've authenticated, type 'check' to continue, or 'help' for more options.
 Waiting for authentication...
 `,
 		c.Formatter.Colorize("🔐 AUTHENTICATION REQUIRED", ansi.UIWarning),
+		scan,
 		c.Formatter.Colorize(authURL, ansi.UIInfo),
+		c.Formatter.Colorize(pairingCode, ansi.UIPrompt),
 		c.Formatter.Colorize("This link will expire in 5 minutes for security.", ansi.UISecondary),
 	)
 
@@ -181,13 +254,6 @@ func (c *Connection) SendGameWelcome() error {
 	message.WriteString(c.formatCharacterStatus())
 	message.WriteString("\r\n")
 
-	// Show current room
-	message.WriteString(c.formatRoomDescription())
-	message.WriteString("\r\n")
-
-	// Show prompt
-	message.WriteString(c.formatPrompt())
-
 	return c.send(message.String())
 }
 
@@ -196,19 +262,27 @@ func (c *Connection) SendHelp() error {
 	help := `
 AVAILABLE COMMANDS
 
-  look, l              Look around your current room
+  look, l              Look around, or look <item>
   north, n             Move north when an exit exists
   south, s             Move south when an exit exists
   east, e              Move east when an exit exists
-  west, w              Move west when an exit exists
+  west                 Move west when an exit exists
+  take, get <item>     Pick up an item
+  drop <item>          Drop an item in the room
+  use <item>           Drink a potion
+  equip <item>         Wear armor or wield a weapon
+  unequip <item>       Stop using equipment
+  talk [name]          Speak with someone here
+  give <item> [name]   Hand an item to someone
+  rest                 Recover health and stamina at an inn
   say <message>        Speak to everyone in the room
-  who, w               Show online players
+  who                  Show online players
   stats, st            Show your character stats
-  inventory, inv, i    Show your inventory placeholder
+  inventory, inv, i    Show your inventory
   help, h              Show this help
   quit, q              Leave the game
 
-Combat and the economy are not wired up yet.
+Fetch the misplaced manifest from the Moonlit Docks and give it to the Town Crier.
 `
 
 	return c.SendMessage(help)
@@ -236,20 +310,37 @@ func (c *Connection) SendWhoList(players []OnlinePlayer) error {
 }
 
 // SendRoomDescription sends the current room description
-func (c *Connection) SendRoomDescription() error {
-	return c.send(c.formatRoomDescription() + "\r\n")
+func (c *Connection) SendRoomDescription(npcs []string, items []string, others []string) error {
+	return c.send(c.formatRoomDescription(npcs, items, others) + "\r\n")
 }
 
 // SendInventory sends the character's inventory
-func (c *Connection) SendInventory() error {
+func (c *Connection) SendInventory(items []*models.InventoryItem) error {
 	if c.Character == nil {
 		return c.SendError("No character selected")
 	}
 
 	inventory := c.Formatter.Colorize("🎒 INVENTORY", ansi.UIInfo) + "\r\n\r\n"
-
-	// TODO: Get actual inventory from database
-	inventory += "Your inventory is empty.\r\n"
+	if len(items) == 0 {
+		inventory += "Your inventory is empty.\r\n"
+	} else {
+		for _, entry := range items {
+			name := entry.Item.Name
+			if entry.Quantity > 1 {
+				name = fmt.Sprintf("%s x%d", name, entry.Quantity)
+			}
+			if entry.Equipped {
+				slot := "equipped"
+				if entry.Item.IsWeapon() {
+					slot = "wielded"
+				} else if entry.Item.IsArmor() {
+					slot = "worn"
+				}
+				name += " (" + slot + ")"
+			}
+			inventory += "  " + name + "\r\n"
+		}
+	}
 	inventory += fmt.Sprintf("Gold: %s\r\n",
 		c.Formatter.Colorize(fmt.Sprintf("%d", c.Character.Gold), ansi.ColorYellow))
 
@@ -303,6 +394,9 @@ func (c *Connection) SendStats() error {
 	stats.WriteString(fmt.Sprintf("Alignment: %s %s\r\n", lawfulText, goodText))
 	stats.WriteString(fmt.Sprintf("Gold: %s\r\n",
 		c.Formatter.Colorize(fmt.Sprintf("%d", c.Character.Gold), ansi.ColorYellow)))
+	if c.Character.Deliveries > 0 {
+		stats.WriteString(fmt.Sprintf("Harbor ledgers returned: %d\r\n", c.Character.Deliveries))
+	}
 
 	return c.SendMessage(stats.String())
 }
@@ -328,7 +422,7 @@ func (c *Connection) formatCharacterStatus() string {
 }
 
 // formatRoomDescription formats the current room description
-func (c *Connection) formatRoomDescription() string {
+func (c *Connection) formatRoomDescription(npcs []string, items []string, others []string) string {
 	if c.Room == nil {
 		return "The world is still loading."
 	}
@@ -344,7 +438,18 @@ func (c *Connection) formatRoomDescription() string {
 		exits = strings.Join(directions, ", ")
 	}
 
-	description := fmt.Sprintf("%s\r\n\r\nObvious exits: %s", c.Room.Description, exits)
+	var extra strings.Builder
+	if len(npcs) > 0 {
+		extra.WriteString("\r\nPeople here: " + strings.Join(npcs, ", "))
+	}
+	if len(others) > 0 {
+		extra.WriteString("\r\nAlso here: " + strings.Join(others, ", "))
+	}
+	if len(items) > 0 {
+		extra.WriteString("\r\nYou see: " + strings.Join(items, ", "))
+	}
+
+	description := fmt.Sprintf("%s\r\n\r\nObvious exits: %s%s", c.Room.Description, exits, extra.String())
 	return fmt.Sprintf("%s\r\n%s", roomName, description)
 }
 
@@ -386,8 +491,8 @@ func (c *Connection) sendPETSCII(data string) error {
 }
 
 func (c *Connection) write(data string) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
 
 	// Set write deadline
 	c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))

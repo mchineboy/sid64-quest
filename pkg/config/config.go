@@ -25,6 +25,7 @@ type ServerConfig struct {
 	Host           string `yaml:"host"`
 	ReadTimeout    int    `yaml:"read_timeout"`
 	WriteTimeout   int    `yaml:"write_timeout"`
+	IdleTimeout    int    `yaml:"idle_timeout"`
 	MaxConnections int    `yaml:"max_connections"`
 }
 
@@ -102,6 +103,7 @@ func LoadFromEnv() *Config {
 			Host:           getEnvString("HOST", "0.0.0.0"),
 			ReadTimeout:    getEnvInt("READ_TIMEOUT", 30),
 			WriteTimeout:   getEnvInt("WRITE_TIMEOUT", 30),
+			IdleTimeout:    getEnvInt("IDLE_TIMEOUT", 900),
 			MaxConnections: getEnvInt("MAX_CONNECTIONS", 1000),
 		},
 		Database: DatabaseConfig{

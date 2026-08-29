@@ -3,8 +3,10 @@ package telnet
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +22,11 @@ import (
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
+
+// errQuit reports that the player asked to leave. It travels the same return
+// path as a failure, so the connection loop must distinguish it from one and
+// close the session without complaining to the player.
+var errQuit = errors.New("client requested disconnect")
 
 // ConnectionState represents the state of a telnet connection
 type ConnectionState int
@@ -44,7 +51,9 @@ type Connection struct {
 	Room         *models.Room
 	Session      *models.Session
 	AuthToken    string
+	PairingCode  string
 	LastActivity time.Time
+	IdleTimeout  time.Duration
 	Reader       *bufio.Reader
 	Writer       *bufio.Writer
 	Formatter    *ansi.Formatter
@@ -53,6 +62,7 @@ type Connection struct {
 	Context      context.Context
 	Cancel       context.CancelFunc
 	mutex        sync.RWMutex
+	writeMutex   sync.Mutex
 }
 
 // Server represents the telnet server
@@ -161,11 +171,14 @@ func (s *Server) handleConnection(netConn net.Conn) {
 	connID := uuid.New().String()
 	ctx, cancel := context.WithCancel(s.ctx)
 
+	idleTimeout := s.idleTimeout()
+
 	conn := &Connection{
 		ID:           connID,
 		Conn:         netConn,
 		State:        StateConnected,
 		LastActivity: time.Now(),
+		IdleTimeout:  idleTimeout,
 		Reader:       bufio.NewReader(netConn),
 		Writer:       bufio.NewWriter(netConn),
 		Formatter:    ansi.NewFormatter(!s.forcePETSCII),
@@ -175,7 +188,7 @@ func (s *Server) handleConnection(netConn net.Conn) {
 	}
 
 	// Set connection timeouts
-	netConn.SetReadDeadline(time.Now().Add(time.Duration(s.config.Server.ReadTimeout) * time.Second))
+	netConn.SetReadDeadline(time.Now().Add(idleTimeout))
 	netConn.SetWriteDeadline(time.Now().Add(time.Duration(s.config.Server.WriteTimeout) * time.Second))
 
 	// Add to connections map
@@ -207,6 +220,11 @@ func (s *Server) handleConnection(netConn net.Conn) {
 			"terminal_type": terminalType,
 			"presentation":  conn.Presentation.String(),
 		}).Info("Terminal type detected")
+	}
+	if conn.Presentation == PresentationPETSCII && !s.forcePETSCII {
+		if err := conn.EnableServerEcho(); err != nil {
+			s.logger.WithError(err).Debug("Failed to negotiate server echo")
+		}
 	}
 
 	// Send the greeting and immediately show the username prompt.
@@ -243,6 +261,9 @@ func (s *Server) connectionLoop(conn *Connection) {
 
 			// Process input based on connection state
 			if err := s.processInput(conn, input); err != nil {
+				if errors.Is(err, errQuit) {
+					return
+				}
 				s.logger.WithError(err).Error("Error processing input")
 				conn.SendError("An error occurred processing your input.")
 			}
@@ -281,6 +302,12 @@ func (s *Server) handleInitialConnection(conn *Connection) error {
 func (s *Server) handleUsernameInput(conn *Connection, username string) error {
 	username = strings.ToLower(username)
 
+	switch username {
+	case "quit", "q", "exit":
+		conn.SendMessage("Goodbye!")
+		return errQuit
+	}
+
 	if len(username) < 3 || len(username) > 20 {
 		conn.SendError("Username must be between 3 and 20 characters.")
 		conn.SendPrompt("Enter your username: ")
@@ -298,18 +325,19 @@ func (s *Server) handleUsernameInput(conn *Connection, username string) error {
 
 	conn.Username = username
 
-	// Generate authentication token
-	token, err := s.authService.GenerateAuthToken(conn.ID)
+	// Generate a long internal token and a short code suitable for a
+	// 40-column terminal and phone entry.
+	token, pairingCode, err := s.authService.GenerateAuthChallenge(conn.ID)
 	if err != nil {
-		return fmt.Errorf("failed to generate auth token: %w", err)
+		return fmt.Errorf("failed to generate auth challenge: %w", err)
 	}
 
 	conn.AuthToken = token
+	conn.PairingCode = pairingCode
 	conn.State = StateAwaitingAuth
 
-	// Send authentication URL
-	authURL := s.authService.GetAuthURL(token)
-	conn.SendAuthInstructions(authURL)
+	pairingURL := s.authService.GetPairingURL(pairingCode)
+	conn.SendAuthInstructions(pairingURL, s.authService.GetPairingEntryURL(), pairingCode)
 
 	return nil
 }
@@ -320,11 +348,11 @@ func (s *Server) handleAuthWaiting(conn *Connection, input string) error {
 
 	switch input {
 	case "help", "h":
-		authURL := s.authService.GetAuthURL(conn.AuthToken)
-		conn.SendAuthInstructions(authURL)
+		pairingURL := s.authService.GetPairingURL(conn.PairingCode)
+		conn.SendAuthInstructions(pairingURL, s.authService.GetPairingEntryURL(), conn.PairingCode)
 	case "quit", "q", "exit":
 		conn.SendMessage("Goodbye!")
-		return fmt.Errorf("user quit")
+		return errQuit
 	case "check", "c":
 		// Check if authentication is complete
 		return s.checkAuthentication(conn)
@@ -364,8 +392,10 @@ func (s *Server) checkAuthentication(conn *Connection) error {
 	}
 
 	if len(characters) == 0 {
-		conn.SendMessage("You don't have any characters yet. Character creation coming soon!")
-		return fmt.Errorf("no characters available")
+		// The player is signed in but has nothing to play. Say so and leave the
+		// session open so they can create a character in the browser and retry.
+		conn.SendMessage("You don't have any characters yet. Create one in the browser, then type 'check' again.")
+		return nil
 	}
 
 	conn.SendCharacterList(characters)
@@ -381,7 +411,7 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 
 	if len(characters) == 0 {
 		conn.SendError("No characters available.")
-		return fmt.Errorf("no characters available")
+		return nil
 	}
 
 	selection, err := strconv.Atoi(input)
@@ -395,6 +425,11 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 	if conn.Character.CurrentRoomID == nil {
 		return fmt.Errorf("character has no current room")
 	}
+	loaded, err := s.world.LoadCharacter(conn.Context, conn.Character.ID)
+	if err != nil {
+		return fmt.Errorf("load character: %w", err)
+	}
+	conn.Character = loaded
 	room, err := s.world.GetRoom(conn.Context, *conn.Character.CurrentRoomID)
 	if err != nil {
 		return fmt.Errorf("load character room: %w", err)
@@ -408,8 +443,13 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 		s.logger.WithError(err).Warn("Failed to publish player connect event")
 	}
 
-	conn.SendGameWelcome()
-	return nil
+	if err := conn.SendGameWelcome(); err != nil {
+		return err
+	}
+	if err := s.sendLook(conn); err != nil {
+		return err
+	}
+	return conn.SendPrompt(conn.formatPrompt())
 }
 
 // handleGameCommand handles in-game commands
@@ -437,9 +477,9 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 
 	// Handle basic commands
 	switch command {
-	case "quit", "q":
+	case "quit", "q", "exit":
 		conn.SendMessage("Goodbye!")
-		return fmt.Errorf("user quit")
+		return errQuit
 	case "help", "h":
 		conn.SendHelp()
 	case "who", "w":
@@ -452,13 +492,86 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 			conn.SendError("Say what?")
 		}
 	case "look", "l":
-		conn.SendRoomDescription()
+		if len(args) == 0 {
+			return s.sendLook(conn)
+		}
+		return s.examineItem(conn, strings.Join(args, " "))
 	case "north", "n", "south", "s", "east", "e", "west":
 		return s.moveCharacter(conn, command)
+	case "take", "get":
+		if len(args) == 0 {
+			conn.SendError("Take what?")
+			return nil
+		}
+		return s.takeItem(conn, strings.Join(args, " "))
+	case "drop":
+		if len(args) == 0 {
+			conn.SendError("Drop what?")
+			return nil
+		}
+		return s.dropItem(conn, strings.Join(args, " "))
+	case "use", "drink":
+		if len(args) == 0 {
+			conn.SendError("Use what?")
+			return nil
+		}
+		return s.useItem(conn, strings.Join(args, " "))
+	case "equip", "wear", "wield":
+		if len(args) == 0 {
+			conn.SendError("Equip what?")
+			return nil
+		}
+		message, err := s.world.EquipItem(conn.Context, conn.Character.ID, strings.Join(args, " "))
+		if err != nil {
+			conn.SendError(err.Error())
+			return nil
+		}
+		return conn.SendMessage(message)
+	case "unequip", "remove":
+		if len(args) == 0 {
+			conn.SendError("Unequip what?")
+			return nil
+		}
+		message, err := s.world.UnequipItem(conn.Context, conn.Character.ID, strings.Join(args, " "))
+		if err != nil {
+			conn.SendError(err.Error())
+			return nil
+		}
+		return conn.SendMessage(message)
+	case "talk":
+		message, err := s.world.Talk(conn.Context, conn.Character.ID, conn.Room.ID, strings.Join(args, " "))
+		if err != nil {
+			conn.SendError(err.Error())
+			return nil
+		}
+		return conn.SendMessage(message)
+	case "give":
+		if len(args) == 0 {
+			conn.SendError("Give what?")
+			return nil
+		}
+		return s.giveItem(conn, args)
+	case "rest":
+		message, character, err := s.world.Rest(conn.Context, conn.Character.ID, conn.Room.ID)
+		if err != nil {
+			conn.SendError(err.Error())
+			return nil
+		}
+		conn.Character = character
+		return conn.SendSuccess(message)
 	case "inventory", "inv", "i":
-		conn.SendInventory()
+		items, err := s.world.ListInventory(conn.Context, conn.Character.ID)
+		if err != nil {
+			return err
+		}
+		return conn.SendInventory(items)
 	case "stats", "st":
-		conn.SendStats()
+		character, err := s.world.LoadCharacter(conn.Context, conn.Character.ID)
+		if err != nil {
+			return err
+		}
+		conn.Character = character
+		return conn.SendStats()
 	default:
 		conn.SendError(fmt.Sprintf("Unknown command: %s", command))
 	}
@@ -470,22 +583,147 @@ func (s *Server) moveCharacter(conn *Connection, direction string) error {
 	if conn.Character == nil || conn.Room == nil {
 		return fmt.Errorf("no character room loaded")
 	}
-	from, to, err := s.world.MoveCharacter(conn.Context, conn.Character.ID, direction)
+	from, to, stamina, err := s.world.MoveCharacter(conn.Context, conn.Character.ID, direction)
 	if err != nil {
 		conn.SendError(err.Error())
 		return nil
 	}
+	direction = game.NormalizeDirection(direction)
 
 	s.broadcastToRoom(from.ID, fmt.Sprintf("%s leaves %s.", conn.Character.Name, direction))
 	conn.Character.CurrentRoomID = &to.ID
+	conn.Character.Stamina = stamina
 	conn.Room = to
-	conn.SendRoomDescription()
+	if err := s.sendLook(conn); err != nil {
+		return err
+	}
 	s.broadcastToRoom(to.ID, fmt.Sprintf("%s arrives.", conn.Character.Name))
 
 	if err := s.eventBus.Publish(events.PlayerMoveEvent(conn.Character.ID, from.ID, to.ID, direction)); err != nil {
 		s.logger.WithError(err).Warn("Failed to publish player movement event")
 	}
 	return nil
+}
+
+func (s *Server) sendLook(conn *Connection) error {
+	npcs, err := s.world.ListRoomNPCs(conn.Context, conn.Room.ID)
+	if err != nil {
+		return err
+	}
+	ground, err := s.world.ListRoomItems(conn.Context, conn.Room.ID)
+	if err != nil {
+		return err
+	}
+
+	npcNames := make([]string, 0, len(npcs))
+	for _, npc := range npcs {
+		npcNames = append(npcNames, npc.Name)
+	}
+	itemNames := make([]string, 0, len(ground))
+	for _, item := range ground {
+		if item.Quantity > 1 {
+			itemNames = append(itemNames, fmt.Sprintf("%s x%d", item.Name, item.Quantity))
+		} else {
+			itemNames = append(itemNames, item.Name)
+		}
+	}
+
+	others := make([]string, 0)
+	s.connMutex.RLock()
+	for _, other := range s.connections {
+		if other.ID != conn.ID && other.State == StateInGame && other.Room != nil && other.Room.ID == conn.Room.ID && other.Character != nil {
+			others = append(others, other.Character.Name)
+		}
+	}
+	s.connMutex.RUnlock()
+	sort.Strings(others)
+
+	return conn.SendRoomDescription(npcNames, itemNames, others)
+}
+
+func (s *Server) examineItem(conn *Connection, query string) error {
+	inventory, err := s.world.ListInventory(conn.Context, conn.Character.ID)
+	if err != nil {
+		return err
+	}
+	for _, entry := range inventory {
+		if game.MatchesName(entry.Item.Name, query) {
+			return conn.SendMessage(entry.Item.Description)
+		}
+	}
+	ground, err := s.world.ListRoomItems(conn.Context, conn.Room.ID)
+	if err != nil {
+		return err
+	}
+	for _, item := range ground {
+		if game.MatchesName(item.Name, query) {
+			return conn.SendMessage(item.Item.Description)
+		}
+	}
+	conn.SendError(fmt.Sprintf("You do not see %q here.", query))
+	return nil
+}
+
+func (s *Server) takeItem(conn *Connection, query string) error {
+	item, err := s.world.TakeItem(conn.Context, conn.Character.ID, conn.Room.ID, query)
+	if err != nil {
+		conn.SendError(err.Error())
+		return nil
+	}
+	s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s takes %s.", conn.Character.Name, item.Name))
+	return nil
+}
+
+func (s *Server) dropItem(conn *Connection, query string) error {
+	item, err := s.world.DropItem(conn.Context, conn.Character.ID, conn.Room.ID, query)
+	if err != nil {
+		conn.SendError(err.Error())
+		return nil
+	}
+	s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s drops %s.", conn.Character.Name, item.Name))
+	return nil
+}
+
+func (s *Server) useItem(conn *Connection, query string) error {
+	message, character, err := s.world.UseItem(conn.Context, conn.Character.ID, query)
+	if err != nil {
+		conn.SendError(err.Error())
+		return nil
+	}
+	conn.Character = character
+	return conn.SendMessage(message)
+}
+
+func (s *Server) giveItem(conn *Connection, args []string) error {
+	words := make([]string, 0, len(args))
+	for _, arg := range args {
+		if !strings.EqualFold(arg, "to") {
+			words = append(words, arg)
+		}
+	}
+	npcs, err := s.world.ListRoomNPCs(conn.Context, conn.Room.ID)
+	if err != nil {
+		return err
+	}
+	itemQuery := strings.Join(words, " ")
+	npcQuery := ""
+	if len(words) >= 2 {
+		last := words[len(words)-1]
+		for _, npc := range npcs {
+			if game.MatchesName(npc.Name, last) {
+				npcQuery = last
+				itemQuery = strings.Join(words[:len(words)-1], " ")
+				break
+			}
+		}
+	}
+	message, character, err := s.world.GiveItem(conn.Context, conn.Character.ID, conn.Room.ID, itemQuery, npcQuery)
+	if err != nil {
+		conn.SendError(err.Error())
+		return nil
+	}
+	conn.Character = character
+	return conn.SendMessage(message)
 }
 
 func (s *Server) sendWhoList(requester *Connection) {
@@ -538,10 +776,22 @@ func (s *Server) cleanupRoutine() {
 	}
 }
 
+// idleTimeout is how long a connection may sit without input before it is
+// dropped. Sessions are interactive: a player reading a room description or a
+// Commodore user typing a pairing code on a phone must not be disconnected, so
+// this is deliberately much longer than the per-request Server.ReadTimeout.
+func (s *Server) idleTimeout() time.Duration {
+	seconds := s.config.Server.IdleTimeout
+	if seconds <= 0 {
+		seconds = 900
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // cleanupInactiveConnections removes inactive connections
 func (s *Server) cleanupInactiveConnections() {
 	now := time.Now()
-	timeout := 10 * time.Minute
+	timeout := s.idleTimeout()
 
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()

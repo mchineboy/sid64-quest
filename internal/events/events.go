@@ -129,16 +129,29 @@ func (eb *EventBus) Subscribe(channels []string, handler func(*Event)) error {
 	pubsub := eb.redis.Subscribe(eb.ctx, channels...)
 	defer pubsub.Close()
 
+	// ReceiveMessage blocks on a socket read, which a cancelled context does
+	// not interrupt. Closing the subscription unblocks it so shutdown is not
+	// held up by an idle channel.
+	closed := make(chan struct{})
+	defer close(closed)
+	go func() {
+		select {
+		case <-eb.ctx.Done():
+			_ = pubsub.Close()
+		case <-closed:
+		}
+	}()
+
 	eb.logger.WithField("channels", channels).Info("Subscribed to event channels")
 
 	for {
 		select {
 		case <-eb.ctx.Done():
-			return eb.ctx.Err()
+			return nil
 		default:
 			msg, err := pubsub.ReceiveMessage(eb.ctx)
 			if err != nil {
-				if err == context.Canceled {
+				if eb.ctx.Err() != nil {
 					return nil
 				}
 				eb.logger.WithError(err).Error("Failed to receive message")

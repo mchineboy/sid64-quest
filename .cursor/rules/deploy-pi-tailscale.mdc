@@ -1,0 +1,24 @@
+---
+description: Host on a Raspberry Pi 5. Tailscale first, public DNS when the MUD is ready. Commodore is a client, not a deploy target.
+alwaysApply: true
+---
+
+# Deploy target: Raspberry Pi 5
+
+The game server runs on a Raspberry Pi 5 (`linux/arm64`). Commodore/PETSCII is a client presentation, not something to install on or deploy to.
+
+The Tailscale machine is **symptom-pi** (account/display: modeburner). On the tailnet, use hostname `symptom-pi` (MagicDNS). If short names fail, use the machine’s full `*.ts.net` name from `tailscale status`.
+
+## Reachability
+
+1. **Now:** invited access via Tailscale to `symptom-pi`. `AUTH_BASE_URL` is `http://symptom-pi:8080` (or `https://…` if Serve is in front), not `localhost`. Telnet `2323` and PETSCII `6464` are on that same host.
+2. **When ready:** a public DNS name pointed at the Pi (or a forwarder). Change `AUTH_BASE_URL` and any advertised host; do not assume the service stays tailnet-only.
+
+Do not introduce Kubernetes or extra long-lived services unless the Pi is actually constrained.
+
+## Implications
+
+- Ship Compose (or two Go binaries plus Postgres and Redis) for `linux/arm64`. Cross-compile with `GOOS=linux GOARCH=arm64`. Prefer the simple Compose file over the monitoring stack.
+- Keep PostgreSQL and Redis; do not require MongoDB, Prometheus, or Grafana on the Pi. Use modest pool/connection limits.
+- Secrets, backups, and the runbook assume a Pi that can lose power: `.env` outside git, scheduled `pg_dump`, restart restores the world without operator SQL.
+- Public DNS does not change the need for a real TLS story on the HTTP login page. Telnet/PETSCII remain unencrypted TCP; that is expected for this kind of MUD, not a reason to block DNS.
