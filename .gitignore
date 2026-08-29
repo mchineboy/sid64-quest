@@ -1,0 +1,6 @@
+/build/
+/templates/
+/coverage.out
+/coverage.html
+/cpu.prof
+/mem.prof

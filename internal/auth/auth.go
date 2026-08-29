@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,45 +39,69 @@ func NewAuthService(db *sql.DB, redis *redis.Client, cfg *config.Config, logger 
 
 // GenerateAuthToken generates a one-time authentication token for a telnet session
 func (as *AuthService) GenerateAuthToken(sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("session ID is required")
+	}
+
 	// Generate a random token
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("failed to generate random token: %w", err)
 	}
-	
+
 	token := hex.EncodeToString(tokenBytes)
-	
-	// Store the token in Redis with expiration
+
+	// Create the pending session before issuing the token. The gateway uses its
+	// connection ID as the session ID, so the browser can later attach an
+	// authenticated user to that same connection.
+	session := models.Session{
+		ID:           sessionID,
+		ConnectionID: sessionID,
+		LastActivity: time.Now(),
+	}
+	sessionData, err := json.Marshal(session)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal session: %w", err)
+	}
+
+	sessionKey := fmt.Sprintf("session:%s", sessionID)
+	if err := as.redis.Set(context.Background(), sessionKey, sessionData, as.config.Auth.SessionExpiry).Err(); err != nil {
+		return "", fmt.Errorf("failed to store session: %w", err)
+	}
+
+	// Store the one-time token in Redis with expiration.
 	authToken := models.AuthToken{
 		Token:     token,
 		SessionID: sessionID,
 		ExpiresAt: time.Now().Add(as.config.Auth.TokenExpiry),
 		Used:      false,
 	}
-	
+
 	tokenData, err := json.Marshal(authToken)
 	if err != nil {
+		as.redis.Del(context.Background(), sessionKey)
 		return "", fmt.Errorf("failed to marshal auth token: %w", err)
 	}
-	
+
 	key := fmt.Sprintf("auth_token:%s", token)
 	if err := as.redis.Set(context.Background(), key, tokenData, as.config.Auth.TokenExpiry).Err(); err != nil {
+		as.redis.Del(context.Background(), sessionKey)
 		return "", fmt.Errorf("failed to store auth token: %w", err)
 	}
-	
+
 	as.logger.WithFields(logrus.Fields{
 		"token":      token[:8] + "...", // Log only first 8 chars for security
 		"session_id": sessionID,
 		"expires_at": authToken.ExpiresAt,
 	}).Debug("Generated auth token")
-	
+
 	return token, nil
 }
 
 // ValidateAuthToken validates an authentication token and returns the session ID
 func (as *AuthService) ValidateAuthToken(token string) (string, error) {
 	key := fmt.Sprintf("auth_token:%s", token)
-	
+
 	tokenData, err := as.redis.Get(context.Background(), key).Result()
 	if err != nil {
 		if err == redis.Nil {
@@ -84,53 +109,53 @@ func (as *AuthService) ValidateAuthToken(token string) (string, error) {
 		}
 		return "", fmt.Errorf("failed to retrieve auth token: %w", err)
 	}
-	
+
 	var authToken models.AuthToken
 	if err := json.Unmarshal([]byte(tokenData), &authToken); err != nil {
 		return "", fmt.Errorf("failed to unmarshal auth token: %w", err)
 	}
-	
+
 	// Check if token is expired
 	if time.Now().After(authToken.ExpiresAt) {
 		as.redis.Del(context.Background(), key)
 		return "", fmt.Errorf("token expired")
 	}
-	
+
 	// Check if token has already been used
 	if authToken.Used {
 		return "", fmt.Errorf("token already used")
 	}
-	
+
 	return authToken.SessionID, nil
 }
 
 // MarkTokenUsed marks an authentication token as used
 func (as *AuthService) MarkTokenUsed(token string) error {
 	key := fmt.Sprintf("auth_token:%s", token)
-	
+
 	tokenData, err := as.redis.Get(context.Background(), key).Result()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve auth token: %w", err)
 	}
-	
+
 	var authToken models.AuthToken
 	if err := json.Unmarshal([]byte(tokenData), &authToken); err != nil {
 		return fmt.Errorf("failed to unmarshal auth token: %w", err)
 	}
-	
+
 	authToken.Used = true
-	
+
 	updatedData, err := json.Marshal(authToken)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated auth token: %w", err)
 	}
-	
+
 	// Update the token with remaining TTL
 	ttl := as.redis.TTL(context.Background(), key).Val()
 	if err := as.redis.Set(context.Background(), key, updatedData, ttl).Err(); err != nil {
 		return fmt.Errorf("failed to update auth token: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -141,11 +166,11 @@ func (as *AuthService) AuthenticateUser(username, password string) (*models.User
 		FROM users 
 		WHERE username = $1 AND is_active = true
 	`
-	
+
 	var user models.User
 	var lastLogin sql.NullTime
 	var permissionsJSON []byte
-	
+
 	err := as.db.QueryRow(query, username).Scan(
 		&user.ID,
 		&user.Username,
@@ -156,19 +181,19 @@ func (as *AuthService) AuthenticateUser(username, password string) (*models.User
 		&user.IsActive,
 		&permissionsJSON,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("invalid username or password")
 		}
 		return nil, fmt.Errorf("failed to query user: %w", err)
 	}
-	
+
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return nil, fmt.Errorf("invalid username or password")
 	}
-	
+
 	// Parse permissions
 	if len(permissionsJSON) > 0 {
 		if err := json.Unmarshal(permissionsJSON, &user.Permissions); err != nil {
@@ -178,28 +203,28 @@ func (as *AuthService) AuthenticateUser(username, password string) (*models.User
 	} else {
 		user.Permissions = make(map[string]interface{})
 	}
-	
+
 	if lastLogin.Valid {
 		user.LastLogin = &lastLogin.Time
 	}
-	
+
 	// Update last login time
 	if err := as.updateLastLogin(user.ID); err != nil {
 		as.logger.WithError(err).Warn("Failed to update last login time")
 	}
-	
+
 	as.logger.WithFields(logrus.Fields{
 		"user_id":  user.ID,
 		"username": user.Username,
 	}).Info("User authenticated successfully")
-	
+
 	return &user, nil
 }
 
 // CreateSession creates a new session for an authenticated user
 func (as *AuthService) CreateSession(userID uuid.UUID, characterID uuid.UUID, connectionID string) (*models.Session, error) {
 	sessionID := uuid.New().String()
-	
+
 	session := models.Session{
 		ID:           sessionID,
 		CharacterID:  characterID,
@@ -208,31 +233,31 @@ func (as *AuthService) CreateSession(userID uuid.UUID, characterID uuid.UUID, co
 		LastActivity: time.Now(),
 		AuthToken:    "", // Will be set when linking with auth token
 	}
-	
+
 	sessionData, err := json.Marshal(session)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal session: %w", err)
 	}
-	
+
 	key := fmt.Sprintf("session:%s", sessionID)
 	if err := as.redis.Set(context.Background(), key, sessionData, as.config.Auth.SessionExpiry).Err(); err != nil {
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
-	
+
 	as.logger.WithFields(logrus.Fields{
-		"session_id":   sessionID,
-		"user_id":      userID,
-		"character_id": characterID,
+		"session_id":    sessionID,
+		"user_id":       userID,
+		"character_id":  characterID,
 		"connection_id": connectionID,
 	}).Debug("Created session")
-	
+
 	return &session, nil
 }
 
 // GetSession retrieves a session by ID
 func (as *AuthService) GetSession(sessionID string) (*models.Session, error) {
 	key := fmt.Sprintf("session:%s", sessionID)
-	
+
 	sessionData, err := as.redis.Get(context.Background(), key).Result()
 	if err != nil {
 		if err == redis.Nil {
@@ -240,12 +265,12 @@ func (as *AuthService) GetSession(sessionID string) (*models.Session, error) {
 		}
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
-	
+
 	var session models.Session
 	if err := json.Unmarshal([]byte(sessionData), &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
 	}
-	
+
 	return &session, nil
 }
 
@@ -255,20 +280,20 @@ func (as *AuthService) UpdateSessionActivity(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	session.LastActivity = time.Now()
-	
+
 	sessionData, err := json.Marshal(session)
 	if err != nil {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
-	
+
 	key := fmt.Sprintf("session:%s", sessionID)
 	ttl := as.redis.TTL(context.Background(), key).Val()
 	if err := as.redis.Set(context.Background(), key, sessionData, ttl).Err(); err != nil {
 		return fmt.Errorf("failed to update session: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -278,35 +303,35 @@ func (as *AuthService) LinkTokenToSession(token, sessionID string, userID, chara
 	if err := as.MarkTokenUsed(token); err != nil {
 		return fmt.Errorf("failed to mark token as used: %w", err)
 	}
-	
+
 	// Update session with authentication info
 	session, err := as.GetSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
 	}
-	
+
 	session.UserID = userID
 	session.CharacterID = characterID
 	session.AuthToken = token
 	session.LastActivity = time.Now()
-	
+
 	sessionData, err := json.Marshal(session)
 	if err != nil {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
-	
+
 	key := fmt.Sprintf("session:%s", sessionID)
 	if err := as.redis.Set(context.Background(), key, sessionData, as.config.Auth.SessionExpiry).Err(); err != nil {
 		return fmt.Errorf("failed to update session: %w", err)
 	}
-	
+
 	as.logger.WithFields(logrus.Fields{
 		"session_id":   sessionID,
 		"user_id":      userID,
 		"character_id": characterID,
 		"token":        token[:8] + "...",
 	}).Info("Linked token to session")
-	
+
 	return nil
 }
 
@@ -316,7 +341,7 @@ func (as *AuthService) DeleteSession(sessionID string) error {
 	if err := as.redis.Del(context.Background(), key).Err(); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
-	
+
 	as.logger.WithField("session_id", sessionID).Debug("Deleted session")
 	return nil
 }
@@ -331,19 +356,19 @@ func (as *AuthService) GetUserCharacters(userID uuid.UUID) ([]*models.Character,
 		WHERE user_id = $1
 		ORDER BY created_at DESC
 	`
-	
+
 	rows, err := as.db.Query(query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query characters: %w", err)
 	}
 	defer rows.Close()
-	
+
 	var characters []*models.Character
-	
+
 	for rows.Next() {
 		var char models.Character
 		var currentRoomID sql.NullString
-		
+
 		err := rows.Scan(
 			&char.ID,
 			&char.UserID,
@@ -362,25 +387,25 @@ func (as *AuthService) GetUserCharacters(userID uuid.UUID) ([]*models.Character,
 			&char.IsSleeping,
 			&char.CreatedAt,
 		)
-		
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan character: %w", err)
 		}
-		
+
 		if currentRoomID.Valid {
 			roomID, err := uuid.Parse(currentRoomID.String)
 			if err == nil {
 				char.CurrentRoomID = &roomID
 			}
 		}
-		
+
 		characters = append(characters, &char)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating characters: %w", err)
 	}
-	
+
 	return characters, nil
 }
 
@@ -391,41 +416,112 @@ func (as *AuthService) CreateUser(username, email, password string) (*models.Use
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
-	
+
 	// Create the user
 	query := `
 		INSERT INTO users (username, email, password_hash, permissions)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id, created_at
 	`
-	
+
 	permissions := map[string]interface{}{
 		"player": true,
 	}
 	permissionsJSON, _ := json.Marshal(permissions)
-	
+
 	var user models.User
 	err = as.db.QueryRow(query, username, email, string(hashedPassword), permissionsJSON).Scan(
 		&user.ID,
 		&user.CreatedAt,
 	)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
-	
+
 	user.Username = username
 	user.Email = email
 	user.IsActive = true
 	user.Permissions = permissions
-	
+
 	as.logger.WithFields(logrus.Fields{
 		"user_id":  user.ID,
 		"username": username,
 		"email":    email,
 	}).Info("Created new user")
-	
+
 	return &user, nil
+}
+
+// RegisterPlayer creates an account and its first character as one database
+// transaction. New characters begin in Town Square so they can enter the
+// playable starter world immediately.
+func (as *AuthService) RegisterPlayer(username, email, password, characterName string) (*models.User, *models.Character, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	email = strings.TrimSpace(email)
+	characterName = strings.TrimSpace(characterName)
+	if len(username) < 3 || len(username) > 20 {
+		return nil, nil, fmt.Errorf("username must be between 3 and 20 characters")
+	}
+	if len(characterName) < 3 || len(characterName) > 30 {
+		return nil, nil, fmt.Errorf("character name must be between 3 and 30 characters")
+	}
+	if !strings.Contains(email, "@") {
+		return nil, nil, fmt.Errorf("a valid email address is required")
+	}
+	if len(password) < 8 {
+		return nil, nil, fmt.Errorf("password must be at least 8 characters")
+	}
+
+	for _, character := range username {
+		if !((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '_') {
+			return nil, nil, fmt.Errorf("username can only contain letters, numbers, and underscores")
+		}
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), as.config.Auth.BCryptCost)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	tx, err := as.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin registration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	permissions, _ := json.Marshal(map[string]bool{"player": true})
+	user := &models.User{Username: username, Email: email, IsActive: true, Permissions: map[string]interface{}{"player": true}}
+	if err := tx.QueryRow(`
+		INSERT INTO users (username, email, password_hash, permissions)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, created_at`, username, email, string(hash), permissions).Scan(&user.ID, &user.CreatedAt); err != nil {
+		return nil, nil, fmt.Errorf("create account: %w", err)
+	}
+
+	var startingRoomID uuid.UUID
+	if err := tx.QueryRow(`SELECT id FROM rooms WHERE name = 'Town Square' ORDER BY created_at LIMIT 1`).Scan(&startingRoomID); err != nil {
+		return nil, nil, fmt.Errorf("find starting room: %w", err)
+	}
+
+	character := &models.Character{}
+	if err := tx.QueryRow(`
+		INSERT INTO characters (user_id, name, gold, current_room_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, user_id, name, level, experience, health, max_health, stamina, max_stamina, gold, alignment_lawful, alignment_good, current_room_id, last_rest, is_sleeping, created_at`,
+		user.ID, characterName, as.config.Game.StartingGold, startingRoomID).Scan(
+		&character.ID, &character.UserID, &character.Name, &character.Level, &character.Experience,
+		&character.Health, &character.MaxHealth, &character.Stamina, &character.MaxStamina,
+		&character.Gold, &character.AlignmentLawful, &character.AlignmentGood, &character.CurrentRoomID,
+		&character.LastRest, &character.IsSleeping, &character.CreatedAt,
+	); err != nil {
+		return nil, nil, fmt.Errorf("create character: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("commit registration: %w", err)
+	}
+	return user, character, nil
 }
 
 // HashPassword hashes a password using bcrypt

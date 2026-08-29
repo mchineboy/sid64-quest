@@ -9,8 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
-
-	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
 
 // EventType represents different types of game events
@@ -25,26 +23,26 @@ const (
 	EventPlayerCommand    EventType = "player.command"
 	EventPlayerDeath      EventType = "player.death"
 	EventPlayerRespawn    EventType = "player.respawn"
-	
+
 	// Combat events
 	EventCombatStart  EventType = "combat.start"
 	EventCombatEnd    EventType = "combat.end"
 	EventCombatAttack EventType = "combat.attack"
 	EventCombatDamage EventType = "combat.damage"
-	
+
 	// Economy events
-	EventItemPickup   EventType = "item.pickup"
-	EventItemDrop     EventType = "item.drop"
-	EventItemUse      EventType = "item.use"
-	EventTransaction  EventType = "economy.transaction"
-	EventAuctionBid   EventType = "auction.bid"
-	EventAuctionEnd   EventType = "auction.end"
-	
+	EventItemPickup  EventType = "item.pickup"
+	EventItemDrop    EventType = "item.drop"
+	EventItemUse     EventType = "item.use"
+	EventTransaction EventType = "economy.transaction"
+	EventAuctionBid  EventType = "auction.bid"
+	EventAuctionEnd  EventType = "auction.end"
+
 	// World events
-	EventRoomEnter EventType = "room.enter"
-	EventRoomLeave EventType = "room.leave"
+	EventRoomEnter  EventType = "room.enter"
+	EventRoomLeave  EventType = "room.leave"
 	EventTimeChange EventType = "world.time_change"
-	
+
 	// Admin events
 	EventAdminAction EventType = "admin.action"
 	EventWorldEdit   EventType = "world.edit"
@@ -72,7 +70,7 @@ type EventBus struct {
 // NewEventBus creates a new event bus
 func NewEventBus(redisClient *redis.Client, logger *logrus.Logger) *EventBus {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &EventBus{
 		redis:  redisClient,
 		logger: logger,
@@ -294,7 +292,7 @@ func TransactionEvent(fromPlayerID, toPlayerID *uuid.UUID, itemID *uuid.UUID, go
 	event := NewEvent(EventTransaction).
 		WithData("gold_amount", goldAmount).
 		WithData("transaction_type", transactionType)
-	
+
 	if fromPlayerID != nil {
 		event.WithData("from_player_id", *fromPlayerID)
 	}
@@ -304,7 +302,7 @@ func TransactionEvent(fromPlayerID, toPlayerID *uuid.UUID, itemID *uuid.UUID, go
 	if itemID != nil {
 		event.WithData("item_id", *itemID)
 	}
-	
+
 	return event.Build()
 }
 

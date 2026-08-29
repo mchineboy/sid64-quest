@@ -19,12 +19,13 @@ type Config struct {
 
 // ServerConfig holds server-specific configuration
 type ServerConfig struct {
-	TelnetPort    int    `yaml:"telnet_port"`
-	HTTPPort      int    `yaml:"http_port"`
-	Host          string `yaml:"host"`
-	ReadTimeout   int    `yaml:"read_timeout"`
-	WriteTimeout  int    `yaml:"write_timeout"`
-	MaxConnections int   `yaml:"max_connections"`
+	TelnetPort     int    `yaml:"telnet_port"`
+	PETSCIIPort    int    `yaml:"petscii_port"`
+	HTTPPort       int    `yaml:"http_port"`
+	Host           string `yaml:"host"`
+	ReadTimeout    int    `yaml:"read_timeout"`
+	WriteTimeout   int    `yaml:"write_timeout"`
+	MaxConnections int    `yaml:"max_connections"`
 }
 
 // DatabaseConfig holds database connection configuration
@@ -62,11 +63,11 @@ type RedisConfig struct {
 
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
-	TokenExpiry    time.Duration `yaml:"token_expiry"`
-	SessionExpiry  time.Duration `yaml:"session_expiry"`
-	BaseURL        string        `yaml:"base_url"`
-	SecretKey      string        `yaml:"secret_key"`
-	BCryptCost     int           `yaml:"bcrypt_cost"`
+	TokenExpiry   time.Duration `yaml:"token_expiry"`
+	SessionExpiry time.Duration `yaml:"session_expiry"`
+	BaseURL       string        `yaml:"base_url"`
+	SecretKey     string        `yaml:"secret_key"`
+	BCryptCost    int           `yaml:"bcrypt_cost"`
 }
 
 // DiscordConfig holds Discord bot configuration
@@ -96,6 +97,7 @@ func LoadFromEnv() *Config {
 	return &Config{
 		Server: ServerConfig{
 			TelnetPort:     getEnvInt("TELNET_PORT", 2323),
+			PETSCIIPort:    getEnvInt("PETSCII_PORT", 6464),
 			HTTPPort:       getEnvInt("HTTP_PORT", 8080),
 			Host:           getEnvString("HOST", "0.0.0.0"),
 			ReadTimeout:    getEnvInt("READ_TIMEOUT", 30),

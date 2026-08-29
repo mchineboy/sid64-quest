@@ -21,6 +21,7 @@ BUILD_DIR=build
 # Docker parameters
 DOCKER_REGISTRY=localhost:5000
 DOCKER_TAG=latest
+COMPOSE ?= docker compose
 
 .PHONY: all build clean test deps docker-build docker-push help
 
@@ -103,40 +104,40 @@ db-migrate:
 # Start development services
 dev-start:
 	@echo "Starting development services..."
-	@docker-compose -f docker-compose.simple.yml up -d
+	@$(COMPOSE) -f docker-compose.simple.yml up -d
 
 # Start full development services (with monitoring)
 dev-start-full:
 	@echo "Starting full development services..."
-	@docker-compose -f docker-compose.dev.yml up -d
+	@$(COMPOSE) -f docker-compose.dev.yml up -d
 
 # Stop development services
 dev-stop:
 	@echo "Stopping development services..."
-	@docker-compose -f docker-compose.simple.yml down
+	@$(COMPOSE) -f docker-compose.simple.yml down
 
 # Stop full development services
 dev-stop-full:
 	@echo "Stopping full development services..."
-	@docker-compose -f docker-compose.dev.yml down
+	@$(COMPOSE) -f docker-compose.dev.yml down
 
 # View development logs
 dev-logs:
-	@docker-compose -f docker-compose.simple.yml logs -f
+	@$(COMPOSE) -f docker-compose.simple.yml logs -f
 
 # View full development logs
 dev-logs-full:
-	@docker-compose -f docker-compose.dev.yml logs -f
+	@$(COMPOSE) -f docker-compose.dev.yml logs -f
 
 # Run telnet gateway locally
 run-telnet-gateway: build-telnet-gateway
 	@echo "Starting telnet gateway..."
-	@./$(BUILD_DIR)/$(TELNET_GATEWAY_BINARY)
+	@set -a; . ./.env; set +a; exec ./$(BUILD_DIR)/$(TELNET_GATEWAY_BINARY)
 
 # Run auth service locally
 run-auth-service: build-auth-service
 	@echo "Starting auth service..."
-	@./$(BUILD_DIR)/$(AUTH_SERVICE_BINARY)
+	@set -a; . ./.env; set +a; exec ./$(BUILD_DIR)/$(AUTH_SERVICE_BINARY)
 
 # Docker builds
 docker-build: docker-build-telnet-gateway docker-build-auth-service

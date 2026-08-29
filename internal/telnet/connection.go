@@ -1,8 +1,10 @@
 package telnet
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,25 +12,44 @@ import (
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
 
+const (
+	telnetIAC   = 255
+	telnetWILL  = 251
+	telnetDO    = 253
+	telnetSB    = 250
+	telnetSE    = 240
+	telnetTTYPE = 24
+	ttypeIS     = 0
+	ttypeSEND   = 1
+)
+
 // ReadLine reads a line of input from the connection
 func (c *Connection) ReadLine() (string, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	// Set read deadline
 	c.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	
-	line, err := c.Reader.ReadString('\n')
-	if err != nil {
-		return "", err
+
+	var line strings.Builder
+	for {
+		character, err := c.readApplicationByte()
+		if err != nil {
+			return "", err
+		}
+
+		switch character {
+		case '\n':
+			return strings.TrimSpace(line.String()), nil
+		case '\r':
+			if next, err := c.Reader.Peek(1); err == nil && next[0] == '\n' {
+				_, _ = c.Reader.ReadByte()
+			}
+			return strings.TrimSpace(line.String()), nil
+		default:
+			line.WriteByte(c.petsciiInputByte(character))
+		}
 	}
-	
-	// Remove telnet control characters and trim
-	line = strings.TrimSpace(line)
-	line = strings.ReplaceAll(line, "\r", "")
-	line = strings.ReplaceAll(line, "\n", "")
-	
-	return line, nil
 }
 
 // SendMessage sends a message to the connection
@@ -67,23 +88,19 @@ func (c *Connection) SendInfo(message string) error {
 
 // SendWelcome sends the initial welcome message
 func (c *Connection) SendWelcome() error {
-	welcome := c.Formatter.Box(`
-    ╔═══════════════════════════════════════════════════════════╗
-    ║                                                           ║
-    ║              🏰 RACE CONDITION KINGDOM 🏰                ║
-    ║                                                           ║
-    ║         A Modern MUD with Classic Telnet Gameplay        ║
-    ║                                                           ║
-    ║  Welcome, adventurer! Prepare for a nostalgic journey    ║
-    ║  through a world of magic, combat, and community.        ║
-    ║                                                           ║
-    ╚═══════════════════════════════════════════════════════════╝
-`, 65)
-	
-	if err := c.send(welcome + "\r\n\r\n"); err != nil {
+	if c.Presentation == PresentationPETSCII {
+		if err := c.sendPETSCII(petsciiWelcome()); err != nil {
+			return err
+		}
+		return c.SendInfo("COMMODORE DETECTED. PETSCII MODE ENABLED.")
+	}
+
+	welcome := c.Formatter.Colorize("RACE CONDITION KINGDOM", ansi.UIInfo) + "\r\n"
+	welcome += "A small telnet world is waiting on the other side of a web login.\r\n\r\n"
+	if err := c.send(welcome); err != nil {
 		return err
 	}
-	
+
 	return c.SendInfo("Connection established. Initializing...")
 }
 
@@ -105,7 +122,7 @@ Waiting for authentication...
 		c.Formatter.Colorize(authURL, ansi.UIInfo),
 		c.Formatter.Colorize("This link will expire in 5 minutes for security.", ansi.UISecondary),
 	)
-	
+
 	return c.send(instructions + "\r\n")
 }
 
@@ -114,38 +131,37 @@ func (c *Connection) SendCharacterList(characters []*models.Character) error {
 	if len(characters) == 0 {
 		return c.SendError("No characters found.")
 	}
-	
+
 	var message strings.Builder
 	message.WriteString(c.Formatter.Colorize("🎭 CHARACTER SELECTION", ansi.UIInfo) + "\r\n\r\n")
-	
+
 	// Create character table
 	headers := []string{"#", "Name", "Level", "Health", "Location"}
 	rows := make([][]string, len(characters))
-	
+
 	for i, char := range characters {
 		health := fmt.Sprintf("%d/%d", char.Health, char.MaxHealth)
 		healthColored := c.Formatter.Colorize(health, ansi.GetHealthColor(char.Health, char.MaxHealth))
-		
+
 		location := "Unknown"
 		if char.CurrentRoomID != nil {
 			location = "Town Square" // TODO: Get actual room name
 		}
-		
+
 		rows[i] = []string{
 			fmt.Sprintf("%d", i+1),
-			c.Formatter.Colorize(char.Name, ansi.UIPrompt),
+			char.Name,
 			fmt.Sprintf("%d", char.Level),
 			healthColored,
 			location,
 		}
 	}
-	
+
 	table := c.Formatter.Table(headers, rows)
 	message.WriteString(table + "\r\n\r\n")
-	
-	// For now, auto-select the first character
-	message.WriteString(c.Formatter.Colorize("Auto-selecting first character...", ansi.UISecondary) + "\r\n")
-	
+
+	message.WriteString(c.Formatter.Colorize("Choose a character number: ", ansi.UISecondary))
+
 	return c.send(message.String())
 }
 
@@ -154,83 +170,74 @@ func (c *Connection) SendGameWelcome() error {
 	if c.Character == nil {
 		return fmt.Errorf("no character selected")
 	}
-	
+
 	var message strings.Builder
-	
+
 	// Clear screen and show welcome
 	message.WriteString(c.Formatter.ClearScreenAndHome())
 	message.WriteString(c.Formatter.Colorize("🎮 ENTERING THE REALM", ansi.UISuccess) + "\r\n\r\n")
-	
+
 	// Character status
 	message.WriteString(c.formatCharacterStatus())
 	message.WriteString("\r\n")
-	
+
 	// Show current room
 	message.WriteString(c.formatRoomDescription())
 	message.WriteString("\r\n")
-	
+
 	// Show prompt
 	message.WriteString(c.formatPrompt())
-	
+
 	return c.send(message.String())
 }
 
 // SendHelp sends the help message
 func (c *Connection) SendHelp() error {
 	help := `
-🆘 AVAILABLE COMMANDS:
+AVAILABLE COMMANDS
 
-Movement & Exploration:
-  look, l          - Look around the current room
-  north, n         - Go north (if exit exists)
-  south, s         - Go south (if exit exists)
-  east, e          - Go east (if exit exists)
-  west, w          - Go west (if exit exists)
+  look, l              Look around your current room
+  north, n             Move north when an exit exists
+  south, s             Move south when an exit exists
+  east, e              Move east when an exit exists
+  west, w              Move west when an exit exists
+  say <message>        Speak to everyone in the room
+  who, w               Show online players
+  stats, st            Show your character stats
+  inventory, inv, i    Show your inventory placeholder
+  help, h              Show this help
+  quit, q              Leave the game
 
-Communication:
-  say <message>    - Say something to everyone in the room
-  tell <player>    - Send a private message to a player
-  who, w           - See who's online
-
-Character & Inventory:
-  stats, st        - View your character statistics
-  inventory, inv, i - View your inventory
-  equipment, eq    - View your equipped items
-
-Game Information:
-  time             - Check the current game time
-  weather          - Check the weather
-  help, h          - Show this help message
-  quit, q          - Quit the game
-
-Type any command to get started!
+Combat and the economy are not wired up yet.
 `
-	
+
 	return c.SendMessage(help)
 }
 
-// SendWhoList sends the list of online players
-func (c *Connection) SendWhoList() error {
-	// TODO: Implement actual who list from active connections
+type OnlinePlayer struct {
+	Name     string
+	Level    int
+	Location string
+}
+
+// SendWhoList sends the list of online players.
+func (c *Connection) SendWhoList(players []OnlinePlayer) error {
 	whoList := c.Formatter.Colorize("👥 PLAYERS ONLINE", ansi.UIInfo) + "\r\n\r\n"
 	whoList += fmt.Sprintf("%-20s %-10s %s\r\n", "Name", "Level", "Location")
 	whoList += strings.Repeat("-", 50) + "\r\n"
-	
-	if c.Character != nil {
-		whoList += fmt.Sprintf("%-20s %-10d %s\r\n", 
-			c.Character.Name, 
-			c.Character.Level, 
-			"Town Square")
+
+	for _, player := range players {
+		whoList += fmt.Sprintf("%-20s %-10d %s\r\n", player.Name, player.Level, player.Location)
 	}
-	
-	whoList += "\r\nTotal: 1 player online"
-	
+
+	whoList += fmt.Sprintf("\r\nTotal: %d player(s) online", len(players))
+
 	return c.SendMessage(whoList)
 }
 
 // SendRoomDescription sends the current room description
 func (c *Connection) SendRoomDescription() error {
-	return c.send(c.formatRoomDescription() + "\r\n" + c.formatPrompt())
+	return c.send(c.formatRoomDescription() + "\r\n")
 }
 
 // SendInventory sends the character's inventory
@@ -238,14 +245,14 @@ func (c *Connection) SendInventory() error {
 	if c.Character == nil {
 		return c.SendError("No character selected")
 	}
-	
+
 	inventory := c.Formatter.Colorize("🎒 INVENTORY", ansi.UIInfo) + "\r\n\r\n"
-	
+
 	// TODO: Get actual inventory from database
 	inventory += "Your inventory is empty.\r\n"
-	inventory += fmt.Sprintf("Gold: %s\r\n", 
+	inventory += fmt.Sprintf("Gold: %s\r\n",
 		c.Formatter.Colorize(fmt.Sprintf("%d", c.Character.Gold), ansi.ColorYellow))
-	
+
 	return c.SendMessage(inventory)
 }
 
@@ -254,29 +261,29 @@ func (c *Connection) SendStats() error {
 	if c.Character == nil {
 		return c.SendError("No character selected")
 	}
-	
+
 	var stats strings.Builder
 	stats.WriteString(c.Formatter.Colorize("📊 CHARACTER STATISTICS", ansi.UIInfo) + "\r\n\r\n")
-	
+
 	// Basic info
-	stats.WriteString(fmt.Sprintf("Name: %s\r\n", 
+	stats.WriteString(fmt.Sprintf("Name: %s\r\n",
 		c.Formatter.Colorize(c.Character.Name, ansi.UIPrompt)))
 	stats.WriteString(fmt.Sprintf("Level: %d\r\n", c.Character.Level))
 	stats.WriteString(fmt.Sprintf("Experience: %d\r\n", c.Character.Experience))
 	stats.WriteString("\r\n")
-	
+
 	// Health and Stamina with progress bars
-	healthBar := c.Formatter.ProgressBar(c.Character.Health, c.Character.MaxHealth, 20, 
+	healthBar := c.Formatter.ProgressBar(c.Character.Health, c.Character.MaxHealth, 20,
 		ansi.Style{Foreground: ansi.GetHealthColor(c.Character.Health, c.Character.MaxHealth)})
-	stats.WriteString(fmt.Sprintf("Health: %s %d/%d\r\n", 
+	stats.WriteString(fmt.Sprintf("Health: %s %d/%d\r\n",
 		healthBar, c.Character.Health, c.Character.MaxHealth))
-	
+
 	staminaBar := c.Formatter.ProgressBar(c.Character.Stamina, c.Character.MaxStamina, 20,
 		ansi.Style{Foreground: ansi.GetStaminaColor(c.Character.Stamina, c.Character.MaxStamina)})
-	stats.WriteString(fmt.Sprintf("Stamina: %s %d/%d\r\n", 
+	stats.WriteString(fmt.Sprintf("Stamina: %s %d/%d\r\n",
 		staminaBar, c.Character.Stamina, c.Character.MaxStamina))
 	stats.WriteString("\r\n")
-	
+
 	// Alignment
 	alignment := c.Character.GetAlignment()
 	lawfulText := "Neutral"
@@ -285,18 +292,18 @@ func (c *Connection) SendStats() error {
 	} else if alignment.Lawful < -25 {
 		lawfulText = "Chaotic"
 	}
-	
+
 	goodText := "Neutral"
 	if alignment.Good > 25 {
 		goodText = "Good"
 	} else if alignment.Good < -25 {
 		goodText = "Evil"
 	}
-	
+
 	stats.WriteString(fmt.Sprintf("Alignment: %s %s\r\n", lawfulText, goodText))
-	stats.WriteString(fmt.Sprintf("Gold: %s\r\n", 
+	stats.WriteString(fmt.Sprintf("Gold: %s\r\n",
 		c.Formatter.Colorize(fmt.Sprintf("%d", c.Character.Gold), ansi.ColorYellow)))
-	
+
 	return c.SendMessage(stats.String())
 }
 
@@ -305,34 +312,39 @@ func (c *Connection) formatCharacterStatus() string {
 	if c.Character == nil {
 		return ""
 	}
-	
+
 	health := c.Formatter.Colorize(
 		fmt.Sprintf("HP: %d/%d", c.Character.Health, c.Character.MaxHealth),
 		ansi.GetHealthColor(c.Character.Health, c.Character.MaxHealth))
-	
+
 	stamina := c.Formatter.Colorize(
 		fmt.Sprintf("SP: %d/%d", c.Character.Stamina, c.Character.MaxStamina),
 		ansi.GetStaminaColor(c.Character.Stamina, c.Character.MaxStamina))
-	
+
 	gold := c.Formatter.Colorize(fmt.Sprintf("Gold: %d", c.Character.Gold), ansi.ColorYellow)
-	
+
 	return fmt.Sprintf("[%s] [%s] [%s] Level %d %s",
 		health, stamina, gold, c.Character.Level, c.Character.Name)
 }
 
 // formatRoomDescription formats the current room description
 func (c *Connection) formatRoomDescription() string {
-	// TODO: Get actual room from database
-	roomName := c.Formatter.Colorize("🏛️  Town Square", ansi.UIPrompt)
-	
-	description := `The heart of the kingdom, a bustling square where adventurers gather. 
-Cobblestone paths lead in all directions, and a magnificent fountain sits in 
-the center. This is a safe haven where no violence is permitted.
+	if c.Room == nil {
+		return "The world is still loading."
+	}
 
-A cheerful Town Crier stands near the fountain, eager to share the latest news.
+	roomName := c.Formatter.Colorize(c.Room.Name, ansi.UIPrompt)
+	directions := make([]string, 0, len(c.Room.Exits))
+	for direction := range c.Room.Exits {
+		directions = append(directions, direction)
+	}
+	sort.Strings(directions)
+	exits := "none"
+	if len(directions) > 0 {
+		exits = strings.Join(directions, ", ")
+	}
 
-Obvious exits: north, south, east, west`
-	
+	description := fmt.Sprintf("%s\r\n\r\nObvious exits: %s", c.Room.Description, exits)
 	return fmt.Sprintf("%s\r\n%s", roomName, description)
 }
 
@@ -341,7 +353,7 @@ func (c *Connection) formatPrompt() string {
 	if c.Character == nil {
 		return "> "
 	}
-	
+
 	prompt := fmt.Sprintf("[%s]> ", c.Character.Name)
 	return c.Formatter.Colorize(prompt, ansi.UIPrompt)
 }
@@ -361,17 +373,30 @@ func (c *Connection) Close() error {
 
 // send sends raw data to the connection
 func (c *Connection) send(data string) error {
+	if c.Presentation == PresentationPETSCII {
+		data = encodePETSCII(data)
+	}
+	return c.write(data)
+}
+
+// sendPETSCII writes a native PETSCII byte stream, including control codes and
+// graphics glyphs that must not be transformed as ordinary text.
+func (c *Connection) sendPETSCII(data string) error {
+	return c.write(data)
+}
+
+func (c *Connection) write(data string) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	
+
 	// Set write deadline
 	c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	
+
 	_, err := c.Writer.WriteString(data)
 	if err != nil {
 		return err
 	}
-	
+
 	return c.Writer.Flush()
 }
 
@@ -379,7 +404,7 @@ func (c *Connection) send(data string) error {
 func (c *Connection) IsConnected() bool {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	
+
 	select {
 	case <-c.Context.Done():
 		return false
@@ -391,4 +416,159 @@ func (c *Connection) IsConnected() bool {
 // GetRemoteAddr returns the remote address of the connection
 func (c *Connection) GetRemoteAddr() string {
 	return c.Conn.RemoteAddr().String()
+}
+
+// SetTerminalType selects the presentation that matches the advertised
+// terminal. A client that does not answer the standard telnet negotiation
+// remains on the ANSI/default path.
+func (c *Connection) SetTerminalType(terminalType string) {
+	c.TerminalType = terminalType
+	c.Presentation = presentationForTerminalType(terminalType)
+	c.Formatter = ansi.NewFormatter(c.Presentation == PresentationANSI)
+}
+
+// NegotiateTerminalType asks for RFC 930/RFC 884 terminal type information.
+// It waits only briefly so old clients that never negotiate are not held at a
+// blank screen. Any ordinary bytes received during that interval are retained
+// in the buffered reader for ReadLine.
+func (c *Connection) NegotiateTerminalType(timeout time.Duration) (string, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if err := c.Conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return "", fmt.Errorf("set negotiation deadline: %w", err)
+	}
+	defer c.Conn.SetReadDeadline(time.Time{})
+
+	if _, err := c.Writer.Write([]byte{telnetIAC, telnetDO, telnetTTYPE}); err != nil {
+		return "", fmt.Errorf("request terminal type: %w", err)
+	}
+	if err := c.Writer.Flush(); err != nil {
+		return "", fmt.Errorf("flush terminal type request: %w", err)
+	}
+
+	for {
+		character, err := c.Reader.ReadByte()
+		if err != nil {
+			if isTimeout(err) {
+				return "", nil
+			}
+			return "", err
+		}
+		if character != telnetIAC {
+			if err := c.Reader.UnreadByte(); err != nil {
+				return "", fmt.Errorf("preserve client input: %w", err)
+			}
+			return "", nil
+		}
+
+		command, err := c.Reader.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		switch command {
+		case telnetWILL:
+			option, err := c.Reader.ReadByte()
+			if err != nil {
+				return "", err
+			}
+			if option == telnetTTYPE {
+				if _, err := c.Writer.Write([]byte{telnetIAC, telnetSB, telnetTTYPE, ttypeSEND, telnetIAC, telnetSE}); err != nil {
+					return "", fmt.Errorf("request terminal type value: %w", err)
+				}
+				if err := c.Writer.Flush(); err != nil {
+					return "", fmt.Errorf("flush terminal type value request: %w", err)
+				}
+			}
+		case telnetDO, 252, 254:
+			if _, err := c.Reader.ReadByte(); err != nil {
+				return "", err
+			}
+		case telnetSB:
+			option, data, err := readTelnetSubnegotiation(c.Reader)
+			if err != nil {
+				return "", err
+			}
+			if option == telnetTTYPE && len(data) > 1 && data[0] == ttypeIS {
+				return string(data[1:]), nil
+			}
+		}
+	}
+}
+
+func readTelnetSubnegotiation(reader *bufio.Reader) (byte, []byte, error) {
+	option, err := reader.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var data []byte
+	for {
+		character, err := reader.ReadByte()
+		if err != nil {
+			return 0, nil, err
+		}
+		if character != telnetIAC {
+			data = append(data, character)
+			continue
+		}
+
+		next, err := reader.ReadByte()
+		if err != nil {
+			return 0, nil, err
+		}
+		switch next {
+		case telnetSE:
+			return option, data, nil
+		case telnetIAC:
+			data = append(data, telnetIAC)
+		default:
+			return 0, nil, fmt.Errorf("unexpected telnet subnegotiation command %d", next)
+		}
+	}
+}
+
+func isTimeout(err error) bool {
+	if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+		return true
+	}
+	return err == io.EOF
+}
+
+func (c *Connection) readApplicationByte() (byte, error) {
+	character, err := c.Reader.ReadByte()
+	if err != nil || character != telnetIAC {
+		return character, err
+	}
+
+	command, err := c.Reader.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	if command == telnetIAC {
+		return telnetIAC, nil
+	}
+	if command == telnetSB {
+		_, _, err := readTelnetSubnegotiation(c.Reader)
+		return 0, err
+	}
+
+	// Negotiation commands are followed by an option byte and are not player
+	// input. Keep reading until a printable byte or line ending arrives.
+	if command == telnetWILL || command == telnetDO || command == 252 || command == 254 {
+		if _, err := c.Reader.ReadByte(); err != nil {
+			return 0, err
+		}
+	}
+	return c.readApplicationByte()
+}
+
+func (c *Connection) petsciiInputByte(character byte) byte {
+	if c.Presentation != PresentationPETSCII {
+		return character
+	}
+	if character >= 0xc1 && character <= 0xda {
+		return 'a' + (character - 0xc1)
+	}
+	return character
 }

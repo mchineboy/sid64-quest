@@ -67,9 +67,16 @@ CREATE TABLE IF NOT EXISTS rooms (
 );
 
 -- Add foreign key constraint for current_room_id after rooms table is created
-ALTER TABLE characters 
-ADD CONSTRAINT fk_characters_current_room 
-FOREIGN KEY (current_room_id) REFERENCES rooms(id);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_characters_current_room'
+    ) THEN
+        ALTER TABLE characters
+        ADD CONSTRAINT fk_characters_current_room
+        FOREIGN KEY (current_room_id) REFERENCES rooms(id);
+    END IF;
+END $$;
 
 -- Items table
 CREATE TABLE IF NOT EXISTS items (
@@ -310,4 +317,15 @@ INSERT INTO users (id, username, email, password_hash, permissions) VALUES
     'admin@raceconditionkingdom.com',
     '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/VcSAg/9qm', -- admin123
     '{"admin": true, "world_builder": true, "moderator": true}'::jsonb
-);
+)
+ON CONFLICT (username) DO NOTHING;
+
+-- The local development account needs a character in order to enter the game.
+INSERT INTO characters (user_id, name, gold, current_room_id)
+SELECT u.id, 'The Steward', 100, r.id
+FROM users u
+CROSS JOIN LATERAL (
+    SELECT id FROM rooms WHERE name = 'Town Square' LIMIT 1
+) r
+WHERE u.username = 'admin'
+ON CONFLICT (name) DO NOTHING;

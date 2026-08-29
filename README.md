@@ -1,368 +1,81 @@
-# 🏰 Race Condition Kingdom
+# Race Condition Kingdom
 
-A modern MUD (Multi-User Dungeon) written in Go, built around nostalgia for telnet-based gameplay but modernized with out-of-band HTTPS authentication, extensibility, and balance-focused gameplay design.
+Race Condition Kingdom is a small Go MUD with a telnet front door and a browser-based login step. It is an early playable foundation, not a finished online world: you can create an account, enter a small shared map, move between rooms, and talk with other players.
 
-## 🎯 Project Overview
+The project began as an experiment in mixing the old telnet MUD experience with a normal web login. The name is a joke; the current server should not be treated as a production service yet.
 
-Race Condition Kingdom combines the classic feel of traditional MUDs with modern architecture and security practices. Players connect via telnet for that authentic retro experience, but authentication happens securely through HTTPS, and the entire system is designed to run on Kubernetes with horizontal scaling.
+## What works today
 
-## ✨ Key Features
+- PostgreSQL, Redis, and MongoDB are started with Docker Compose.
+- The telnet gateway accepts connections and hands each player a short-lived browser login link.
+- The auth service validates the link and attaches the browser login to the telnet session.
+- New players can create an account and their first character from that same browser handoff.
+- A persistent five-room starter area supports `look`, cardinal movement, `say`, and a real `who` list.
+- PETSCII-aware telnet clients get a native Commodore presentation; raw Commodore callers can use the dedicated PETSCII port.
+- A local development account has a character, **The Steward**, and can enter the game.
+- In-game commands: `look`, `say`, `who`, `stats`, `inventory`, `help`, and `quit`.
 
-### 🔐 Authentication & Connectivity
-- **Telnet-based gameplay** with ANSI color support
-- **Out-of-band HTTPS authentication** for security
-- **Web-based telnet client** option (coming soon)
-- **Session management** with Redis-backed tokens
-- **Multi-character support** per account
+## What is still a stub
 
-### 🏗️ Modern Architecture
-- **Kubernetes-native** with stateless containers
-- **Hybrid database approach**: PostgreSQL for critical data, Redis for sessions/cache, MongoDB for logs
-- **Event-driven architecture** with Redis pub/sub
-- **Horizontal scaling** support
-- **Health checks** and monitoring
+Combat, inventory persistence, private messages, shops, banks, auctions, builders, moderation, and production monitoring are either placeholders or schema/design work. The database has seed data for some of those ideas, but the gateway does not implement them.
 
-### 🎮 Gameplay Systems
-- **Town square hub** with banks, shops, inns, and auction house
-- **Territory-based PvP** with safe zones
-- **Stamina/health management** with rest requirements
-- **Death and recovery system** with humorous healthcare references
-- **Alignment system** (Lawful/Chaotic, Good/Evil)
-- **Time-of-day and seasonal cycles** (planned)
+That distinction matters: this repository is ready for local development and for turning into a real game, but it is not ready to be exposed as a public MUD.
 
-### 🧠 Extensibility
-- **World Building Mode** with sandboxed environment
-- **Starlark scripting** for safe, sandboxed content creation
-- **Admin approval system** for user-generated content
-- **Discord integration** for logging and moderation
-- **Plugin architecture** for custom functionality
+## Run it locally
 
-### 💰 Economy
-- **Player-to-player trading** and gifting
-- **Auction house** with bidding system
-- **Weight-based inventory** with encumbrance limits
-- **Inn storage** with "infinite" capacity (Hitchhiker's Guide reference)
-- **Dual banking system** with different rules and benefits
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Go 1.21 or later
-- Docker and Docker Compose
-- Make (optional, but recommended)
-
-### Development Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/tylerhardison/race-condition-kingdom.git
-   cd race-condition-kingdom
-   ```
-
-2. **Run the development setup script**
-   ```bash
-   chmod +x scripts/dev-setup.sh
-   ./scripts/dev-setup.sh
-   ```
-
-3. **Start development services**
-   ```bash
-   make dev-start
-   ```
-
-4. **Build the project**
-   ```bash
-   make build
-   ```
-
-5. **Start the services**
-   ```bash
-   # Terminal 1: Start auth service
-   make run-auth-service
-   
-   # Terminal 2: Start telnet gateway
-   make run-telnet-gateway
-   ```
-
-6. **Connect and play**
-   ```bash
-   telnet localhost 2323
-   ```
-
-### First Login
-
-1. Connect via telnet: `telnet localhost 2323`
-2. Enter username when prompted
-3. Visit the authentication URL provided
-4. Use the default admin account:
-   - Username: `admin`
-   - Password: `admin123`
-5. Return to telnet and type `check` to continue
-
-## 🏗️ Architecture
-
-The system is built with a microservices architecture designed for Kubernetes deployment:
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Telnet Gateway │    │  Auth Service   │    │  Game Engine    │
-│     (Go)        │    │     (Go)        │    │     (Go)        │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-         ┌─────────────────────────────────────────────────┐
-         │              Redis Pub/Sub                      │
-         │            (Event System)                       │
-         └─────────────────────────────────────────────────┘
-                                 │
-    ┌────────────────┬───────────┼───────────┬────────────────┐
-    │                │           │           │                │
-┌───▼───┐    ┌──────▼──────┐    │    ┌─────▼─────┐    ┌────▼────┐
-│PostgreSQL│  │    Redis    │    │    │  MongoDB  │    │ Discord │
-│(Critical │  │ (Sessions/  │    │    │  (Logs/   │    │   Bot   │
-│  Data)   │  │  Cache)     │    │    │Analytics) │    │(Logging)│
-└──────────┘  └─────────────┘    │    └───────────┘    └─────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │    World Builder        │
-                    │   (Starlark Scripts)    │
-                    └─────────────────────────┘
-```
-
-### Core Services
-
-- **Telnet Gateway**: Handles telnet connections, ANSI formatting, and player I/O
-- **Auth Service**: Manages HTTPS authentication and session linking
-- **Game Engine**: Core game logic, world state, and event processing (planned)
-- **World Builder**: Sandboxed content creation with Starlark scripting (planned)
-- **Admin Console**: REPL interface for administration (planned)
-
-### Data Storage
-
-- **PostgreSQL**: Users, characters, world data, transactions
-- **Redis**: Sessions, real-time game state, pub/sub events
-- **MongoDB**: Logs, analytics, builder content
-
-## 🎮 Gameplay
-
-### Basic Commands
-
-```
-Movement & Exploration:
-  look, l          - Look around the current room
-  north, n         - Go north (if exit exists)
-  south, s         - Go south (if exit exists)
-  east, e          - Go east (if exit exists)
-  west, w          - Go west (if exit exists)
-
-Communication:
-  say <message>    - Say something to everyone in the room
-  tell <player>    - Send a private message to a player
-  who, w           - See who's online
-
-Character & Inventory:
-  stats, st        - View your character statistics
-  inventory, inv, i - View your inventory
-  equipment, eq    - View your equipped items
-
-Game Information:
-  time             - Check the current game time
-  weather          - Check the weather
-  help, h          - Show help message
-  quit, q          - Quit the game
-```
-
-### World Layout
-
-The game starts in the **Town Square**, a safe zone that serves as the hub for all activities:
-
-- **Banks**: Two different banks with unique rules and benefits
-- **Shops**: Magic items, weapons/armor, and trinkets
-- **Inn**: Rest and "infinite" storage (with Hitchhiker's Guide humor)
-- **Auction House**: Player-to-player trading
-- **Infirmary**: Resurrection services with healthcare humor
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-race-condition-kingdom/
-├── cmd/                    # Service entry points
-│   ├── telnet-gateway/     # Telnet server
-│   ├── auth-service/       # Authentication service
-│   ├── game-engine/        # Game logic service (planned)
-│   ├── world-builder/      # World building service (planned)
-│   └── admin-console/      # Admin REPL (planned)
-├── internal/               # Private application code
-│   ├── auth/              # Authentication logic
-│   ├── game/              # Core game systems (planned)
-│   ├── telnet/            # Telnet protocol handling
-│   ├── ansi/              # ANSI escape code utilities
-│   ├── scripting/         # Starlark integration (planned)
-│   ├── database/          # Database abstractions
-│   ├── events/            # Event system
-│   └── discord/           # Discord bot integration (planned)
-├── pkg/                   # Public library code
-│   ├── models/            # Shared data models
-│   ├── config/            # Configuration management
-│   └── utils/             # Shared utilities
-├── scripts/               # Development and deployment scripts
-├── k8s/                   # Kubernetes manifests (planned)
-├── docker/                # Docker configurations (planned)
-└── docs/                  # Documentation
-```
-
-### Available Make Targets
+You need Go 1.23 (the version in `go.mod`) and Docker Desktop or another Docker-compatible runtime with Compose v2.
 
 ```bash
-make help              # Show all available targets
-make build             # Build all services
-make test              # Run tests
-make dev-start         # Start development services
-make dev-stop          # Stop development services
-make run-telnet-gateway # Run telnet gateway locally
-make run-auth-service  # Run auth service locally
+git clone https://github.com/tylerhardison/race-condition-kingdom.git
+cd race-condition-kingdom
+
+docker compose -f docker-compose.simple.yml up -d
+go test ./...
+make build
 ```
 
-### Environment Configuration
-
-Copy `.env.example` to `.env` and customize:
+Start the two applications in separate terminals:
 
 ```bash
-# Server Configuration
-TELNET_PORT=2323
-HTTP_PORT=8080
-
-# Database Configuration
-POSTGRES_HOST=localhost
-POSTGRES_PASSWORD=mud_password
-REDIS_HOST=localhost
-MONGODB_URI=mongodb://admin:admin_password@localhost:27017
-
-# Authentication
-AUTH_SECRET_KEY=your-secret-key-here
+make run-auth-service
 ```
-
-## 🧪 Testing
-
-### Unit Tests
-```bash
-make test
-```
-
-### Integration Tests
-```bash
-make integration-test
-```
-
-### Load Testing
-```bash
-make load-test
-```
-
-## 📊 Monitoring
-
-The development environment includes comprehensive monitoring:
-
-- **Grafana**: http://localhost:3000 (admin/admin123)
-- **Prometheus**: http://localhost:9090
-- **pgAdmin**: http://localhost:8081 (admin@raceconditionkingdom.com/admin123)
-- **Redis Commander**: http://localhost:8082
-- **Mongo Express**: http://localhost:8083 (admin/admin123)
-
-## 🚢 Deployment
-
-### Docker
 
 ```bash
-make docker-build
-make docker-push
+make run-telnet-gateway
 ```
 
-### Kubernetes
+Then connect from a third terminal:
 
 ```bash
-make k8s-deploy
+telnet localhost 2323
 ```
 
-## 🤝 Contributing
+Commodore 64/128 callers should connect their PETSCII terminal program to port `6464` instead. On the normal telnet port, the server also uses terminal-type negotiation and switches automatically when a client identifies itself as PETSCII, C64, C128, CCGMS, CGTerm, NovaTerm, or UltimateTerm.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes
-4. Run tests: `make test`
-5. Commit your changes: `git commit -m 'Add amazing feature'`
-6. Push to the branch: `git push origin feature/amazing-feature`
-7. Open a Pull Request
+At the username prompt, enter a name, then open the URL printed by the game. Sign in with `admin` / `admin123` or follow the link to create your own account and first character. Do not deploy the development account, its password, or the compose-file credentials anywhere public. Type `check` in telnet after the browser confirms the login, then enter `1` to select a character.
 
-### Code Style
+Stop the backing services with:
 
-- Follow Go conventions and use `gofmt`
-- Write tests for new functionality
-- Update documentation as needed
-- Use conventional commit messages
+```bash
+make dev-stop
+```
 
-## 📋 Roadmap
+To discard local database data completely, use `docker compose -f docker-compose.simple.yml down -v`.
 
-### Phase 1: Core Infrastructure ✅
-- [x] Authentication system with HTTPS
-- [x] Telnet gateway with ANSI support
-- [x] Database abstraction layer
-- [x] Event system with Redis pub/sub
-- [x] Basic project structure and tooling
+## Useful commands
 
-### Phase 2: Basic Gameplay (In Progress)
-- [ ] Room navigation system
-- [ ] Inventory management
-- [ ] Basic combat system
-- [ ] Chat and communication
-- [ ] Character creation
+```bash
+make test                 # run Go tests
+make build                # build the auth service and telnet gateway
+make dev-start            # start PostgreSQL, Redis, and MongoDB
+make dev-stop             # stop those services
+make dev-start-full       # start databases plus the optional admin/monitoring tools
+```
 
-### Phase 3: Economy & Trading
-- [ ] Shop system
-- [ ] Auction house
-- [ ] Player-to-player trading
-- [ ] Banking system
-- [ ] Item crafting
+The service defaults live in [`pkg/config/config.go`](pkg/config/config.go). The `make run-*` commands export the local `.env` file before starting a service. If you run a binary directly, export that file yourself first (for example, `set -a; . ./.env; set +a`).
 
-### Phase 4: World Building
-- [ ] Starlark scripting engine
-- [ ] World builder interface
-- [ ] Content approval system
-- [ ] Script sandboxing
+## A practical next milestone
 
-### Phase 5: Advanced Features
-- [ ] PvP system
-- [ ] Guild system
-- [ ] Time and weather cycles
-- [ ] Advanced combat mechanics
-- [ ] Mobile/web client
+The next useful step is a persistent player loop: items, inventory, health/stamina, and one small repeatable objective. Splitting it into more services, Kubernetes, Discord, scripts, or an auction system will make operating it harder before it makes the game more playable.
 
-### Phase 6: Polish & Scale
-- [ ] Performance optimization
-- [ ] Advanced monitoring
-- [ ] Load balancing
-- [ ] Content management tools
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Inspired by classic MUDs like DikuMUD, CircleMUD, and LPC-based systems
-- Built with modern Go practices and cloud-native architecture
-- Special thanks to the MUD development community for decades of innovation
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/tylerhardison/race-condition-kingdom/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/tylerhardison/race-condition-kingdom/discussions)
-- **Discord**: Coming soon!
-
----
-
-*"In a world of race conditions, only the Kingdom stands eternal."* 🏰
+`ARCHITECTURE.md` records the original, much larger idea. It is useful as a backlog, not a description of the running system.

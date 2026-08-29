@@ -39,6 +39,14 @@ type AuthResponse struct {
 	Token   string `json:"token,omitempty"`
 }
 
+type registerPageData struct {
+	Token         string
+	Error         string
+	Username      string
+	Email         string
+	CharacterName string
+}
+
 func main() {
 	// Initialize logger
 	logger := logrus.New()
@@ -71,13 +79,15 @@ func main() {
 
 	// Setup routes
 	router := mux.NewRouter()
-	
+
 	// Authentication routes
 	router.HandleFunc("/auth", handler.handleAuthPage).Methods("GET")
 	router.HandleFunc("/auth", handler.handleAuthSubmit).Methods("POST")
+	router.HandleFunc("/register", handler.handleRegisterPage).Methods("GET")
+	router.HandleFunc("/register", handler.handleRegisterSubmit).Methods("POST")
 	router.HandleFunc("/api/auth", handler.handleAPIAuth).Methods("POST")
 	router.HandleFunc("/health", handler.handleHealth).Methods("GET")
-	
+
 	// Static files (if needed)
 	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 
@@ -113,6 +123,74 @@ func main() {
 	}
 
 	logger.Info("Auth service stopped")
+}
+
+func (h *AuthHandler) handleRegisterPage(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, "Missing authentication token", http.StatusBadRequest)
+		return
+	}
+	if _, err := h.authService.ValidateAuthToken(token); err != nil {
+		h.logger.WithError(err).Warn("Invalid auth token for registration")
+		http.Error(w, "Invalid or expired authentication token", http.StatusBadRequest)
+		return
+	}
+	h.renderRegisterPage(w, registerPageData{Token: token})
+}
+
+func (h *AuthHandler) handleRegisterSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+	data := registerPageData{
+		Token:         r.FormValue("token"),
+		Username:      r.FormValue("username"),
+		Email:         r.FormValue("email"),
+		CharacterName: r.FormValue("character_name"),
+	}
+	if data.Token == "" || r.FormValue("password") == "" {
+		data.Error = "All fields are required."
+		h.renderRegisterPage(w, data)
+		return
+	}
+
+	sessionID, err := h.authService.ValidateAuthToken(data.Token)
+	if err != nil {
+		h.logger.WithError(err).Warn("Invalid auth token during registration")
+		http.Error(w, "Invalid or expired authentication token", http.StatusBadRequest)
+		return
+	}
+
+	user, character, err := h.authService.RegisterPlayer(data.Username, data.Email, r.FormValue("password"), data.CharacterName)
+	if err != nil {
+		data.Error = "Could not create that account. " + err.Error()
+		h.renderRegisterPage(w, data)
+		return
+	}
+	if err := h.authService.LinkTokenToSession(data.Token, sessionID, user.ID, character.ID); err != nil {
+		h.logger.WithError(err).Error("Failed to link registered user to session")
+		http.Error(w, "Authentication linking failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := h.templates.ExecuteTemplate(w, "success.html", struct {
+		Username      string
+		CharacterName string
+	}{Username: user.Username, CharacterName: character.Name}); err != nil {
+		h.logger.WithError(err).Error("Failed to render registration success")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+}
+
+func (h *AuthHandler) renderRegisterPage(w http.ResponseWriter, data registerPageData) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := h.templates.ExecuteTemplate(w, "register.html", data); err != nil {
+		h.logger.WithError(err).Error("Failed to render registration page")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // handleAuthPage serves the authentication page
@@ -176,18 +254,18 @@ func (h *AuthHandler) handleAuthSubmit(w http.ResponseWriter, r *http.Request) {
 	user, err := h.authService.AuthenticateUser(username, password)
 	if err != nil {
 		h.logger.WithError(err).Info("Authentication failed")
-		
+
 		// Render error page
 		data := struct {
-			Token   string
-			Error   string
+			Token    string
+			Error    string
 			Username string
 		}{
-			Token:   token,
-			Error:   "Invalid username or password",
+			Token:    token,
+			Error:    "Invalid username or password",
 			Username: username,
 		}
-		
+
 		w.Header().Set("Content-Type", "text/html")
 		if err := h.templates.ExecuteTemplate(w, "auth.html", data); err != nil {
 			h.logger.WithError(err).Error("Failed to render auth template with error")
@@ -221,10 +299,10 @@ func (h *AuthHandler) handleAuthSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Render success page
 	data := struct {
-		Username    string
+		Username      string
 		CharacterName string
 	}{
-		Username:    user.Username,
+		Username:      user.Username,
 		CharacterName: character.Name,
 	}
 
@@ -345,22 +423,16 @@ func (h *AuthHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"status": "healthy",
-		"service": "auth-service",
+		"status":    "healthy",
+		"service":   "auth-service",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
 // loadTemplates loads HTML templates
 func (h *AuthHandler) loadTemplates() error {
-	// Create templates directory if it doesn't exist
-	if _, err := os.Stat("templates"); os.IsNotExist(err) {
-		if err := os.MkdirAll("templates", 0755); err != nil {
-			return fmt.Errorf("failed to create templates directory: %w", err)
-		}
-	}
-
-	// Create auth template if it doesn't exist
+	// Keep the templates in the binary so the service can start from any
+	// read-only working directory.
 	authTemplate := `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -408,9 +480,45 @@ func (h *AuthHandler) loadTemplates() error {
         </form>
         
         <div class="info">
-            Don't have an account? Character creation will be available soon!<br>
-            For now, use the default admin account: admin / admin123
+            New here? <a href="/register?token={{.Token}}">Create an account and character.</a><br>
+            Local development account: admin / admin123
         </div>
+    </div>
+</body>
+</html>`
+
+	registerTemplate := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join Race Condition Kingdom</title>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: #000; padding: 30px; border: 2px solid #00ff00; border-radius: 10px; }
+        .title { text-align: center; color: #ffff00; margin-bottom: 20px; font-size: 24px; }
+        .form-group { margin-bottom: 16px; } label { display: block; margin-bottom: 5px; color: #00ffff; }
+        input { box-sizing: border-box; width: 100%; padding: 10px; background: #333; border: 1px solid #666; color: #fff; font-family: inherit; }
+        input[type="submit"] { width: auto; background: #00ff00; color: #000; border: none; cursor: pointer; font-weight: bold; }
+        .error { color: #ff8080; margin-bottom: 16px; padding: 10px; border: 1px solid #ff0000; background: #330000; }
+        .info { color: #ffff00; font-size: 14px; }
+        a { color: #00ffff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">JOIN THE KINGDOM</div>
+        <div class="info">Create one account and the character who will enter Town Square.</div>
+        {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+        <form method="POST" action="/register">
+            <input type="hidden" name="token" value="{{.Token}}">
+            <div class="form-group"><label>Account username</label><input name="username" value="{{.Username}}" required autofocus></div>
+            <div class="form-group"><label>Email</label><input type="email" name="email" value="{{.Email}}" required></div>
+            <div class="form-group"><label>Password (8+ characters)</label><input type="password" name="password" required></div>
+            <div class="form-group"><label>Character name</label><input name="character_name" value="{{.CharacterName}}" required></div>
+            <input type="submit" value="CREATE CHARACTER">
+        </form>
+        <p class="info"><a href="/auth?token={{.Token}}">I already have an account.</a></p>
     </div>
 </body>
 </html>`
@@ -441,19 +549,15 @@ func (h *AuthHandler) loadTemplates() error {
 </body>
 </html>`
 
-	// Write templates to files
-	if err := os.WriteFile("templates/auth.html", []byte(authTemplate), 0644); err != nil {
-		return fmt.Errorf("failed to write auth template: %w", err)
-	}
-
-	if err := os.WriteFile("templates/success.html", []byte(successTemplate), 0644); err != nil {
-		return fmt.Errorf("failed to write success template: %w", err)
-	}
-
-	// Parse templates
-	templates, err := template.ParseGlob("templates/*.html")
+	templates, err := template.New("auth.html").Parse(authTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to parse templates: %w", err)
+	}
+	if _, err := templates.New("success.html").Parse(successTemplate); err != nil {
+		return fmt.Errorf("failed to parse success template: %w", err)
+	}
+	if _, err := templates.New("register.html").Parse(registerTemplate); err != nil {
+		return fmt.Errorf("failed to parse registration template: %w", err)
 	}
 
 	h.templates = templates

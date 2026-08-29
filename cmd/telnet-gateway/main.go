@@ -13,6 +13,7 @@ import (
 	"github.com/tylerhardison/race-condition-kingdom/internal/auth"
 	"github.com/tylerhardison/race-condition-kingdom/internal/database"
 	"github.com/tylerhardison/race-condition-kingdom/internal/events"
+	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 	"github.com/tylerhardison/race-condition-kingdom/internal/telnet"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 )
@@ -28,9 +29,10 @@ func main() {
 	// Load configuration
 	cfg := config.LoadFromEnv()
 	logger.WithFields(logrus.Fields{
-		"telnet_port": cfg.Server.TelnetPort,
-		"http_port":   cfg.Server.HTTPPort,
-		"host":        cfg.Server.Host,
+		"telnet_port":  cfg.Server.TelnetPort,
+		"petscii_port": cfg.Server.PETSCIIPort,
+		"http_port":    cfg.Server.HTTPPort,
+		"host":         cfg.Server.Host,
 	}).Info("Configuration loaded")
 
 	// Initialize database connections
@@ -63,9 +65,14 @@ func main() {
 
 	// Initialize authentication service
 	authService := auth.NewAuthService(db.GetPostgreSQLDB(), db.GetRedisClient(), cfg, logger)
+	worldService := game.NewWorldService(db.GetPostgreSQLDB())
+	if err := worldService.EnsureStarterWorld(context.Background()); err != nil {
+		logger.WithError(err).Fatal("Failed to initialize starter world")
+	}
 
 	// Initialize telnet server
-	telnetServer := telnet.NewServer(cfg, authService, eventBus, logger)
+	telnetServer := telnet.NewServer(cfg, authService, eventBus, worldService, logger)
+	petsciiServer := telnet.NewPETSCIIServer(cfg, authService, eventBus, worldService, logger)
 
 	// Start background services
 	var wg sync.WaitGroup
@@ -95,6 +102,15 @@ func main() {
 		}
 	}()
 
+	// Start the dedicated PETSCII listener for raw Commodore terminal clients.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := petsciiServer.Start(); err != nil {
+			logger.WithError(err).Error("PETSCII telnet server failed")
+		}
+	}()
+
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -111,6 +127,9 @@ func main() {
 	// Stop telnet server
 	if err := telnetServer.Stop(); err != nil {
 		logger.WithError(err).Error("Error stopping telnet server")
+	}
+	if err := petsciiServer.Stop(); err != nil {
+		logger.WithError(err).Error("Error stopping PETSCII telnet server")
 	}
 
 	// Wait for background goroutines to finish
