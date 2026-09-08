@@ -25,8 +25,8 @@ while read -r version expected; do
 done <<< "$migration_checksums"
 export CGO_ENABLED=0 GOOS=linux GOARCH=arm64
 mkdir -p build/pi
-for app in auth-service telnet-gateway rck-admin; do go build -o "build/pi/$app" "./cmd/$app"; done
+for app in auth-service telnet-gateway rck-admin game-core terminal-edge core-switch; do go build -o "build/pi/$app" "./cmd/$app"; done
 ssh tyler.hardison@symptom-pi 'cd /srv/rck && ./backup.sh'
-scp build/pi/auth-service build/pi/telnet-gateway build/pi/rck-admin deploy/pi/Dockerfile tyler.hardison@symptom-pi:/srv/rck/image/
+scp build/pi/auth-service build/pi/telnet-gateway build/pi/rck-admin build/pi/game-core build/pi/terminal-edge build/pi/core-switch deploy/pi/Dockerfile tyler.hardison@symptom-pi:/srv/rck/image/
 scp deploy/pi/compose.yml deploy/pi/backup.sh deploy/pi/restore-check.sh tyler.hardison@symptom-pi:/srv/rck/
 ssh tyler.hardison@symptom-pi 'cd /srv/rck && docker tag rck:alpha rck:previous && docker build -t rck:alpha image && docker compose up -d --wait --wait-timeout 180'

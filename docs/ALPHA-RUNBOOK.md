@@ -2,6 +2,11 @@
 
 Host: `ssh tyler.hardison@symptom-pi` (Debian ARM64, hostname modeburner). Deployment: `/srv/rck`. One gateway process owns presence for both terminal modes; do not scale gateway replicas.
 
+An opt-in persistent edge/core topology is available; see
+[connection-preserving core deployments](BLUE-GREEN-DEPLOYMENTS.md). It needs an
+explicit initial migration from the legacy gateway. The commands below still
+stop the whole stack and must not be used for core-only rollouts afterward.
+
 Public web: https://sid64.quest/account
 Public ANSI: `sid64.quest:2323`; public PETSCII: `sid64.quest:6464`.
 The private `symptom-pi` endpoints remain available for operator diagnostics over the tailnet. The existing symptom tracker retains ports 80/443 and 3000. MUD HTTP is loopback port 8081; databases have no published host ports.

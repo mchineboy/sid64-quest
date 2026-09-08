@@ -29,7 +29,23 @@ COMPOSE ?= docker compose
 all: clean deps test build
 
 # Build all services
-build: build-telnet-gateway build-auth-service
+build: build-telnet-gateway build-auth-service build-core build-edge build-core-switch
+
+build-core:
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) -o $(BUILD_DIR)/game-core ./cmd/game-core
+
+build-edge:
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) -o $(BUILD_DIR)/terminal-edge ./cmd/terminal-edge
+
+build-core-switch:
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) -o $(BUILD_DIR)/core-switch ./cmd/core-switch
+
+# Local live-service tests create and drop their own disposable databases.
+test-core-restart: build-core build-edge build-core-switch
+	@set -a; . ./.env; set +a; RCK_CORE_INTEGRATION=1 RCK_INTEGRATION_BIN_DIR="$(CURDIR)/$(BUILD_DIR)" $(GOTEST) -race -count=1 -v ./internal/telnet -run TestCoreIntegration
 
 # Build individual services
 build-telnet-gateway:

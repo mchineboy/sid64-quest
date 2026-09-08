@@ -116,14 +116,28 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal
+	// SIGUSR1 is the first half of a blue/green handoff: stop accepting new
+	// terminals but keep established sockets alive. The deployment proxy must
+	// remove this instance from rotation before sending the signal.
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1)
 
 	logger.Info("Telnet Gateway is running. Press Ctrl+C to stop.")
 
-	// Block until signal received
-	sig := <-sigChan
+	var sig os.Signal
+	for {
+		sig = <-sigChan
+		if sig != syscall.SIGUSR1 {
+			break
+		}
+		logger.Info("Drain signal received; existing terminal sessions will remain connected")
+		if err := telnetServer.Drain(); err != nil {
+			logger.WithError(err).Error("Error draining telnet listener")
+		}
+		if err := petsciiServer.Drain(); err != nil {
+			logger.WithError(err).Error("Error draining PETSCII listener")
+		}
+	}
 	logger.WithField("signal", sig).Info("Shutdown signal received")
 
 	// Graceful shutdown

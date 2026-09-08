@@ -14,18 +14,20 @@ import (
 
 // WorldService owns the small persistent starter world used by the gateway.
 type WorldService struct {
-	db *sql.DB
+	db    queries
+	pool  *sql.DB
+	outer *sql.Tx
 }
 
 func NewWorldService(db *sql.DB) *WorldService {
-	return &WorldService{db: db}
+	return &WorldService{db: db, pool: db}
 }
 
 // EnsureStarterWorld creates the compact initial map and repairs its exits on
 // every startup. It is safe to call repeatedly and gives old local databases a
 // usable world without asking developers to destroy their data volumes.
 func (ws *WorldService) EnsureStarterWorld(ctx context.Context) error {
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin starter world setup: %w", err)
 	}
@@ -146,7 +148,7 @@ func (ws *WorldService) MoveCharacter(ctx context.Context, characterID uuid.UUID
 		return nil, nil, 0, fmt.Errorf("that is not a direction")
 	}
 
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("begin movement: %w", err)
 	}
@@ -210,7 +212,7 @@ func (ws *WorldService) LoadCharacter(ctx context.Context, characterID uuid.UUID
 	return &char, nil
 }
 
-func (ws *WorldService) getRoomTx(ctx context.Context, tx *sql.Tx, roomID uuid.UUID) (*models.Room, error) {
+func (ws *WorldService) getRoomTx(ctx context.Context, tx transaction, roomID uuid.UUID) (*models.Room, error) {
 	var room models.Room
 	var exitsData []byte
 	var flagsData []byte

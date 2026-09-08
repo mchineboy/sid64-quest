@@ -2,7 +2,6 @@ package game
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
@@ -90,7 +89,7 @@ func (ws *WorldService) Talk(ctx context.Context, characterID, roomID uuid.UUID,
 }
 
 func (ws *WorldService) GiveItem(ctx context.Context, characterID, roomID uuid.UUID, itemQuery, npcQuery string) (string, *models.Character, error) {
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return "", nil, fmt.Errorf("begin give: %w", err)
 	}
@@ -213,7 +212,7 @@ func (ws *WorldService) Rest(ctx context.Context, characterID, roomID uuid.UUID)
 	return "You rest by the fire. Health and stamina are restored.", character, nil
 }
 
-func (ws *WorldService) listRoomNPCsTx(ctx context.Context, tx *sql.Tx, roomID uuid.UUID) ([]*models.NPC, error) {
+func (ws *WorldService) listRoomNPCsTx(ctx context.Context, tx transaction, roomID uuid.UUID) ([]*models.NPC, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, name, description, room_id, health, max_health, level, created_at
 		FROM npcs WHERE room_id = $1 ORDER BY name`, roomID)

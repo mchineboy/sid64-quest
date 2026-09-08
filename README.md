@@ -111,6 +111,10 @@ Operational work completed:
 
 The deployed world is separate from local development data. Deployment interrupts active terminal sessions.
 
+An opt-in persistent terminal edge now supports core restarts and blue/green
+switches without dropping ANSI/PETSCII sockets, with durable session recovery
+and command deduplication. See [the deployment and local testing guide](docs/BLUE-GREEN-DEPLOYMENTS.md).
+
 Read the [operator runbook](docs/ALPHA-RUNBOOK.md), [Pi configuration](deploy/pi/compose.yml), and [EC2 gateway notes](deploy/ec2/README.md) before operating the deployment.
 
 ## Development

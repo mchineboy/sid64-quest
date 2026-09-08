@@ -59,12 +59,14 @@ type Connection struct {
 	Formatter    *ansi.Formatter
 	TerminalType string
 	Presentation Presentation
-	Context      context.Context
-	Cancel       context.CancelFunc
-	mutex        sync.RWMutex
-	writeMutex   sync.Mutex
-	afterCR      bool
-	ScriptEditor *scriptEditor
+	// The edge decoder reads presentation concurrently with core responses.
+	inputPresentation func() Presentation
+	Context           context.Context
+	Cancel            context.CancelFunc
+	mutex             sync.RWMutex
+	writeMutex        sync.Mutex
+	afterCR           bool
+	ScriptEditor      *scriptEditor
 }
 
 // Server represents the telnet server
@@ -78,6 +80,8 @@ type Server struct {
 	port         int
 	forcePETSCII bool
 	listener     net.Listener
+	listenerMu   sync.Mutex
+	draining     bool
 	connections  map[string]*Connection
 	connMutex    sync.RWMutex
 	ctx          context.Context
@@ -123,7 +127,14 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to start telnet server: %w", err)
 	}
 
+	s.listenerMu.Lock()
 	s.listener = listener
+	draining := s.draining
+	s.listenerMu.Unlock()
+	if draining {
+		_ = listener.Close()
+		return nil
+	}
 	s.logger.WithField("address", addr).Info("Telnet server started")
 
 	// Start connection cleanup routine
@@ -134,6 +145,9 @@ func (s *Server) Start() error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			if s.IsDraining() {
+				return nil
+			}
 			select {
 			case <-s.ctx.Done():
 				return nil
@@ -150,11 +164,10 @@ func (s *Server) Start() error {
 
 // Stop stops the telnet server
 func (s *Server) Stop() error {
-	s.cancel()
-
-	if s.listener != nil {
-		s.listener.Close()
+	if err := s.Drain(); err != nil {
+		return err
 	}
+	s.cancel()
 
 	// Close all connections
 	s.connMutex.Lock()
@@ -166,6 +179,31 @@ func (s *Server) Stop() error {
 	s.wg.Wait()
 	s.logger.Info("Telnet server stopped")
 	return nil
+}
+
+// Drain stops accepting new clients without cancelling or closing established
+// terminal sessions. A stable TCP proxy can route new clients to a replacement
+// gateway while this process continues serving its existing sockets.
+func (s *Server) Drain() error {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	s.draining = true
+	if s.listener == nil {
+		return nil
+	}
+	if err := s.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
+	}
+	s.listener = nil
+	s.logger.WithField("port", s.port).Info("Telnet server draining")
+	return nil
+}
+
+// IsDraining reports whether this server has stopped accepting new clients.
+func (s *Server) IsDraining() bool {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	return s.draining
 }
 
 // handleConnection handles a new telnet connection
@@ -534,7 +572,7 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 
 	// Publish player connect event
 	event := events.PlayerConnectEvent(conn.Character.ID, conn.Character.Name)
-	if err := s.eventBus.Publish(event); err != nil {
+	if err := s.publish(event); err != nil {
 		s.logger.WithError(err).Warn("Failed to publish player connect event")
 	}
 
@@ -721,7 +759,7 @@ func (s *Server) moveCharacter(conn *Connection, direction string) error {
 	}
 	s.broadcastToRoom(to.ID, fmt.Sprintf("%s arrives.", conn.Character.Name))
 
-	if err := s.eventBus.Publish(events.PlayerMoveEvent(conn.Character.ID, from.ID, to.ID, direction)); err != nil {
+	if err := s.publish(events.PlayerMoveEvent(conn.Character.ID, from.ID, to.ID, direction)); err != nil {
 		s.logger.WithError(err).Warn("Failed to publish player movement event")
 	}
 	_, err = s.runScriptHook(conn, "room", to.ID, "on_enter", direction, "")
@@ -900,6 +938,13 @@ func (s *Server) broadcastToRoom(roomID uuid.UUID, message string) {
 			}
 		}
 	}
+}
+
+func (s *Server) publish(event *events.Event) error {
+	if s.eventBus == nil {
+		return nil
+	} // Core room output is committed in its outbox.
+	return s.eventBus.Publish(event)
 }
 
 // cleanupRoutine periodically cleans up inactive connections

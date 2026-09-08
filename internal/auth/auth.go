@@ -25,9 +25,18 @@ var pairingEncoding = base32.NewEncoding("0123456789ABCDEFGHJKMNPQRSTVWXYZ").Wit
 // AuthService handles authentication and session management
 type AuthService struct {
 	db     *sql.DB
+	readTx *sql.Tx
 	redis  *redis.Client
 	config *config.Config
 	logger *logrus.Logger
+}
+
+// WithReadTransaction keeps terminal authorization and character selection in
+// the core's command transaction without needing another pooled connection.
+func (as *AuthService) WithReadTransaction(tx *sql.Tx) *AuthService {
+	copy := *as
+	copy.readTx = tx
+	return &copy
 }
 
 // NewAuthService creates a new authentication service
@@ -400,7 +409,13 @@ func (as *AuthService) GetUserCharacters(userID uuid.UUID) ([]*models.Character,
 		ORDER BY created_at DESC
 	`
 
-	rows, err := as.db.Query(query, userID)
+	var rows *sql.Rows
+	var err error
+	if as.readTx != nil {
+		rows, err = as.readTx.Query(query, userID)
+	} else {
+		rows, err = as.db.Query(query, userID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to query characters: %w", err)
 	}
@@ -615,6 +630,12 @@ func (as *AuthService) GetPairingEntryURL() string {
 // UserActive rechecks operator disabling for already-connected players.
 func (as *AuthService) UserActive(ctx context.Context, id uuid.UUID) (bool, error) {
 	var active bool
-	err := as.db.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id=$1`, id).Scan(&active)
+	var row *sql.Row
+	if as.readTx != nil {
+		row = as.readTx.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id=$1`, id)
+	} else {
+		row = as.db.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id=$1`, id)
+	}
+	err := row.Scan(&active)
 	return active, err
 }

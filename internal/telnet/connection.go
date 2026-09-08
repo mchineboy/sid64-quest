@@ -116,7 +116,7 @@ func (c *Connection) EnableServerEcho() error {
 }
 
 func (c *Connection) echoPETSCIIByte(character byte) error {
-	if c.Presentation != PresentationPETSCII {
+	if c.inputMode() != PresentationPETSCII {
 		return nil
 	}
 
@@ -733,7 +733,7 @@ func (c *Connection) readApplicationByte() (byte, error) {
 }
 
 func (c *Connection) petsciiInputByte(character byte) byte {
-	if c.Presentation != PresentationPETSCII {
+	if c.inputMode() != PresentationPETSCII {
 		return character
 	}
 	if character >= 0x41 && character <= 0x5a {
@@ -746,4 +746,11 @@ func (c *Connection) petsciiInputByte(character byte) byte {
 		return 'A' + (character - 0xc1)
 	}
 	return character
+}
+
+func (c *Connection) inputMode() Presentation {
+	if c.inputPresentation != nil {
+		return c.inputPresentation()
+	}
+	return c.Presentation
 }

@@ -2,7 +2,6 @@ package game
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,7 +69,7 @@ func (ws *WorldService) ListRoomItems(ctx context.Context, roomID uuid.UUID) ([]
 }
 
 func (ws *WorldService) TakeItem(ctx context.Context, characterID, roomID uuid.UUID, query string) (*models.Item, error) {
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin take: %w", err)
 	}
@@ -138,7 +137,7 @@ func (ws *WorldService) TakeItem(ctx context.Context, characterID, roomID uuid.U
 }
 
 func (ws *WorldService) DropItem(ctx context.Context, characterID, roomID uuid.UUID, query string) (*models.Item, error) {
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin drop: %w", err)
 	}
@@ -183,7 +182,7 @@ func (ws *WorldService) DropItem(ctx context.Context, characterID, roomID uuid.U
 }
 
 func (ws *WorldService) UseItem(ctx context.Context, characterID uuid.UUID, query string) (string, *models.Character, error) {
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return "", nil, fmt.Errorf("begin use: %w", err)
 	}
@@ -243,7 +242,7 @@ func (ws *WorldService) UseItem(ctx context.Context, characterID uuid.UUID, quer
 }
 
 func (ws *WorldService) EquipItem(ctx context.Context, characterID uuid.UUID, query string) (string, error) {
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return "", fmt.Errorf("begin equip: %w", err)
 	}
@@ -302,7 +301,7 @@ func (ws *WorldService) UnequipItem(ctx context.Context, characterID uuid.UUID, 
 	return fmt.Sprintf("You remove %s.", chosen.Item.Name), nil
 }
 
-func (ws *WorldService) listRoomItemsTx(ctx context.Context, tx *sql.Tx, roomID uuid.UUID) ([]GroundItem, error) {
+func (ws *WorldService) listRoomItemsTx(ctx context.Context, tx transaction, roomID uuid.UUID) ([]GroundItem, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT ri.item_id, ri.quantity, i.id, i.name, i.description, i.item_type, i.weight, i.value, i.properties
 		FROM room_items ri
@@ -328,7 +327,7 @@ func (ws *WorldService) listRoomItemsTx(ctx context.Context, tx *sql.Tx, roomID 
 	return result, rows.Err()
 }
 
-func (ws *WorldService) listInventoryTx(ctx context.Context, tx *sql.Tx, characterID uuid.UUID) ([]*models.InventoryItem, error) {
+func (ws *WorldService) listInventoryTx(ctx context.Context, tx transaction, characterID uuid.UUID) ([]*models.InventoryItem, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT inv.id, inv.character_id, inv.item_id, inv.quantity, inv.equipped, inv.acquired_at,
 		       i.id, i.name, i.description, i.item_type, i.weight, i.value, i.properties
@@ -391,7 +390,7 @@ func inventoryMatchError(query string, err error) error {
 	return err
 }
 
-func requireCharacterInRoom(ctx context.Context, tx *sql.Tx, characterID, roomID uuid.UUID) error {
+func requireCharacterInRoom(ctx context.Context, tx transaction, characterID, roomID uuid.UUID) error {
 	var current uuid.UUID
 	if err := tx.QueryRowContext(ctx, `SELECT current_room_id FROM characters WHERE id = $1 FOR UPDATE`, characterID).Scan(&current); err != nil {
 		return fmt.Errorf("lock character: %w", err)
@@ -404,7 +403,7 @@ func requireCharacterInRoom(ctx context.Context, tx *sql.Tx, characterID, roomID
 
 // TakeAll transfers available stacks atomically, respecting capacity and quest uniqueness.
 func (ws *WorldService) TakeAll(ctx context.Context, characterID, roomID uuid.UUID) ([]GroundItem, error) {
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}

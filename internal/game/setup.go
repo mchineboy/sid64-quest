@@ -21,7 +21,7 @@ const (
 	maxInventorySize  = 50
 )
 
-func ensurePersistentLoop(ctx context.Context, tx *sql.Tx, rooms map[string]uuid.UUID) error {
+func ensurePersistentLoop(ctx context.Context, tx transaction, rooms map[string]uuid.UUID) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS room_items (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -37,7 +37,7 @@ var scriptTables = map[string]string{"room": "rooms", "item": "items", "npc": "n
 func (ws *WorldService) ScriptCommand(ctx context.Context, actor uuid.UUID, req ScriptRequest) ([]ScriptDraft, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func (ws *WorldService) RunScript(ctx context.Context, character, room, target u
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	tx, err := ws.db.BeginTx(ctx, nil)
+	tx, err := ws.beginTx(ctx)
 	if err != nil {
 		return scripting.Output{}, err
 	}
