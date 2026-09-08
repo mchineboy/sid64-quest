@@ -356,39 +356,25 @@ func (as *AuthService) UpdateSessionActivity(sessionID string) error {
 
 // LinkTokenToSession links an authentication token to a session after successful auth
 func (as *AuthService) LinkTokenToSession(token, sessionID string, userID, characterID uuid.UUID) error {
-	// Mark token as used
-	if err := as.MarkTokenUsed(token); err != nil {
-		return fmt.Errorf("failed to mark token as used: %w", err)
-	}
-
-	// Update session with authentication info
-	session, err := as.GetSession(sessionID)
+	// Consume the challenge and attach identity atomically. A replay or a
+	// disconnected terminal must never authenticate another session.
+	const script = `
+ local raw=redis.call('GET',KEYS[1]); local current=redis.call('GET',KEYS[2]);
+ if not raw or not current then return 0 end;
+ local challenge=cjson.decode(raw); local session=cjson.decode(current);
+ if challenge.used or challenge.session_id~=ARGV[1] then return 0 end;
+ challenge.used=true; session.user_id=ARGV[2]; session.character_id=ARGV[3];
+ session.auth_token=ARGV[4]; session.last_activity=ARGV[5];
+ local ttl=redis.call('PTTL',KEYS[1]); if ttl<=0 then return 0 end;
+ redis.call('SET',KEYS[1],cjson.encode(challenge),'PX',ttl);
+ redis.call('SET',KEYS[2],cjson.encode(session),'EX',ARGV[6]); return 1;`
+	n, err := as.redis.Eval(context.Background(), script, []string{"auth_token:" + token, "session:" + sessionID}, sessionID, userID.String(), characterID.String(), token, time.Now().Format(time.RFC3339Nano), int(as.config.Auth.SessionExpiry.Seconds())).Int()
 	if err != nil {
-		return fmt.Errorf("failed to get session: %w", err)
+		return err
 	}
-
-	session.UserID = userID
-	session.CharacterID = characterID
-	session.AuthToken = token
-	session.LastActivity = time.Now()
-
-	sessionData, err := json.Marshal(session)
-	if err != nil {
-		return fmt.Errorf("failed to marshal session: %w", err)
+	if n != 1 {
+		return fmt.Errorf("invalid, expired or already used pairing challenge")
 	}
-
-	key := fmt.Sprintf("session:%s", sessionID)
-	if err := as.redis.Set(context.Background(), key, sessionData, as.config.Auth.SessionExpiry).Err(); err != nil {
-		return fmt.Errorf("failed to update session: %w", err)
-	}
-
-	as.logger.WithFields(logrus.Fields{
-		"session_id":   sessionID,
-		"user_id":      userID,
-		"character_id": characterID,
-		"token":        token[:8] + "...",
-	}).Info("Linked token to session")
-
 	return nil
 }
 
@@ -624,4 +610,11 @@ func (as *AuthService) GetPairingURL(code string) string {
 // GetPairingEntryURL returns the fixed page where a player can type the code.
 func (as *AuthService) GetPairingEntryURL() string {
 	return strings.TrimRight(as.config.Auth.BaseURL, "/") + "/pair"
+}
+
+// UserActive rechecks operator disabling for already-connected players.
+func (as *AuthService) UserActive(ctx context.Context, id uuid.UUID) (bool, error) {
+	var active bool
+	err := as.db.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id=$1`, id).Scan(&active)
+	return active, err
 }

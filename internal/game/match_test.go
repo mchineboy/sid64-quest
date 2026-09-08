@@ -21,7 +21,7 @@ func TestNormalizeDirection(t *testing.T) {
 	assert.Equal(t, "south", NormalizeDirection("S"))
 	assert.Equal(t, "east", NormalizeDirection("east"))
 	assert.Equal(t, "west", NormalizeDirection("west"))
-	assert.Equal(t, "", NormalizeDirection("w"))
+	assert.Equal(t, "west", NormalizeDirection("w"))
 	assert.Equal(t, "", NormalizeDirection("up"))
 }
 

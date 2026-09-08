@@ -24,7 +24,7 @@ func main() {
 	logger.SetLevel(logrus.InfoLevel)
 	logger.SetFormatter(&logrus.JSONFormatter{})
 
-	logger.Info("Starting Race Condition Kingdom Telnet Gateway")
+	logger.Info("Starting SID64 Quest Telnet Gateway")
 
 	// Load configuration
 	cfg := config.LoadFromEnv()
@@ -73,6 +73,8 @@ func main() {
 	// Initialize telnet server
 	telnetServer := telnet.NewServer(cfg, authService, eventBus, worldService, logger)
 	petsciiServer := telnet.NewPETSCIIServer(cfg, authService, eventBus, worldService, logger)
+
+	petsciiServer.SharePlayers(telnetServer)
 
 	// Start background services
 	var wg sync.WaitGroup

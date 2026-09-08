@@ -1,6 +1,6 @@
 # Roadmap to a playable private alpha
 
-The project is a working local vertical slice, not yet a game people can meaningfully inhabit. This plan deliberately earns complexity: a shared world comes before extra services, dashboards, or a Kubernetes deployment.
+The project is a deployed private-alpha vertical slice with a small starter world. This plan deliberately earns complexity: a shared world comes before extra services, dashboards, or a Kubernetes deployment.
 
 ## 1. Foundation — complete
 
@@ -13,7 +13,7 @@ The project is a working local vertical slice, not yet a game people can meaning
 
 - Negotiate the telnet `TERMINAL-TYPE` option.
 - Recognize PETSCII/Commodore terminal identifiers and render a 40-column PETSCII experience with native color and graphics bytes.
-- Keep ANSI as the default, and add an explicit player override for terminals that do not report their type.
+- ANSI remains the default; `terminal ansi` and `terminal petscii` override detection during login or play (implemented).
 - Test with a C64-capable client such as CCGMS/UltimateTerm and SyncTerm configured for C64 mode.
 
 **Exit condition:** an ANSI terminal and a PETSCII terminal can both complete login and read the core screens correctly.
@@ -36,7 +36,7 @@ The project is a working local vertical slice, not yet a game people can meaning
 
 **Exit condition met:** a player has a reason to log back in, and their progress survives a restart.
 
-## 5. Private-alpha hardening
+## 5. Private-alpha hardening — deployed, invited playtest pending
 
 The first host is the Raspberry Pi 5 Tailscale machine **symptom-pi** (modeburner). Invited play goes over the tailnet. When the MUD is ready, it gets a public DNS name; Commodore/PETSCII remains a client connecting to that host, not a deployment target.
 
@@ -46,6 +46,8 @@ The first host is the Raspberry Pi 5 Tailscale machine **symptom-pi** (modeburne
 - Keep the Pi image small: PostgreSQL, Redis, auth HTTP, and the telnet/PETSCII listeners. Do not require MongoDB or the monitoring Compose file.
 - Add HTTP rate limits, session handling, audit logging, health/readiness, TLS for the login page, and `pg_dump` backups that survive a power loss.
 - Run a small invited playtest over the tailnet, then fix disconnect/reconnect and abuse cases.
+
+Migrations, fresh Pi secrets, TLS, rate limits, shared terminal presence, duplicate-session protection, readiness, account operations, scheduled backups and restore rehearsals are implemented. See [the runbook](docs/ALPHA-RUNBOOK.md). Real-hardware validation and an invited playtest remain.
 
 **Exit condition:** a small invited group can play on the Pi without the operator babysitting every login or restart.
 

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Race Condition Kingdom - Development Setup Script
+# SID64 Quest - Development Setup Script
 
 set -e
 
-echo "🏰 Race Condition Kingdom - Development Setup"
+echo "SID64 Quest - Development Setup"
 echo "=============================================="
 
 # Colors for output
@@ -95,8 +95,12 @@ setup_environment() {
     
     # Create .env file if it doesn't exist
     if [ ! -f .env ]; then
+        umask 077
+        local rck_pg_password=$(openssl rand -hex 32)
+        local rck_mongo_password=$(openssl rand -hex 32)
+        local rck_auth_secret=$(openssl rand -hex 32)
         cat > .env << EOF
-# Race Condition Kingdom - Environment Configuration
+# SID64 Quest - Environment Configuration
 
 # Server Configuration
 HOST=0.0.0.0
@@ -113,7 +117,7 @@ POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DB=race_condition_kingdom
 POSTGRES_USER=mud_user
-POSTGRES_PASSWORD=mud_password
+POSTGRES_PASSWORD=$rck_pg_password
 POSTGRES_SSL_MODE=disable
 POSTGRES_MAX_CONNS=25
 
@@ -125,7 +129,8 @@ REDIS_DB=0
 REDIS_POOL_SIZE=10
 
 # MongoDB Configuration
-MONGODB_URI=mongodb://admin:admin_password@localhost:27017
+MONGODB_URI=
+MONGODB_ROOT_PASSWORD=$rck_mongo_password
 MONGODB_DB=race_condition_kingdom_logs
 MONGODB_TIMEOUT=10
 
@@ -133,7 +138,7 @@ MONGODB_TIMEOUT=10
 AUTH_TOKEN_EXPIRY=300
 AUTH_SESSION_EXPIRY=86400
 AUTH_BASE_URL=http://localhost:8080
-AUTH_SECRET_KEY=change-me-in-production-please-use-a-long-random-string
+AUTH_SECRET_KEY=$rck_auth_secret
 BCRYPT_COST=12
 
 # Discord Configuration (optional)
@@ -213,7 +218,7 @@ setup_git_hooks() {
         # Pre-commit hook
         cat > .git/hooks/pre-commit << 'EOF'
 #!/bin/bash
-# Pre-commit hook for Race Condition Kingdom
+# Pre-commit hook for SID64 Quest
 
 echo "Running pre-commit checks..."
 
@@ -318,10 +323,10 @@ main() {
     echo "Development URLs:"
     echo "- Telnet: telnet localhost 2323"
     echo "- Auth Service: http://localhost:8080"
-    echo "- pgAdmin: http://localhost:8081 (admin@raceconditionkingdom.com / admin123)"
+    echo "- pgAdmin: http://localhost:8081"
     echo "- Redis Commander: http://localhost:8082"
-    echo "- Mongo Express: http://localhost:8083 (admin / admin123)"
-    echo "- Grafana: http://localhost:3000 (admin / admin123)"
+    echo "- Mongo Express: http://localhost:8083"
+    echo "- Grafana: http://localhost:3000"
     echo "- Prometheus: http://localhost:9090"
     echo
 }

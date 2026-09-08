@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: race_condition_kingdom
       POSTGRES_USER: mud_user
-      POSTGRES_PASSWORD: mud_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
     ports:
       - "5432:5432"
@@ -44,7 +44,7 @@ services:
     container_name: rck-mongodb
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin_password
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:?Set MONGODB_ROOT_PASSWORD in .env}
       MONGO_INITDB_DATABASE: race_condition_kingdom_logs
     ports:
       - "27017:27017"
@@ -63,8 +63,8 @@ services:
     image: dpage/pgadmin4:latest
     container_name: rck-pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@raceconditionkingdom.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_DEFAULT_EMAIL: admin@sid64.quest
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?Set PGADMIN_PASSWORD}
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     ports:
       - "8081:80"
@@ -94,10 +94,10 @@ services:
     container_name: rck-mongo-express
     environment:
       ME_CONFIG_MONGODB_ADMINUSERNAME: admin
-      ME_CONFIG_MONGODB_ADMINPASSWORD: admin_password
-      ME_CONFIG_MONGODB_URL: mongodb://admin:admin_password@mongodb:27017/
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGODB_ROOT_PASSWORD:?required}
+      ME_CONFIG_MONGODB_URL: mongodb://admin:${MONGODB_ROOT_PASSWORD:?required}@mongodb:27017/
       ME_CONFIG_BASICAUTH_USERNAME: admin
-      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:?Set MONGO_EXPRESS_PASSWORD}
     ports:
       - "8083:8081"
     networks:
@@ -127,7 +127,7 @@ services:
     image: grafana/grafana:latest
     container_name: rck-grafana
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD}
     ports:
       - "3000:3000"
     volumes:

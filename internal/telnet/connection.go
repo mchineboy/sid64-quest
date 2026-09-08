@@ -2,6 +2,7 @@ package telnet
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -24,6 +25,8 @@ const (
 	ttypeSEND   = 1
 )
 
+var errLineTooLong = errors.New("input line exceeds 1024 bytes")
+
 // ReadLine reads a line of input from the connection. The deadline bounds how
 // long the player may stay idle, not how long a single read may take, so it
 // must cover the time a user spends reading the screen or signing in elsewhere.
@@ -35,31 +38,37 @@ func (c *Connection) ReadLine() (string, error) {
 	c.Conn.SetReadDeadline(time.Now().Add(idle))
 
 	var line []byte
+	tooLong := false
+	finish := func() (string, error) {
+		if tooLong {
+			return "", errLineTooLong
+		}
+		return strings.TrimSpace(string(line)), nil
+	}
 	for {
 		character, err := c.readApplicationByte()
 		if err != nil {
 			return "", err
 		}
 
+		if c.afterCR {
+			c.afterCR = false
+			if character == '\n' || character == 0 {
+				continue
+			}
+		}
 		switch character {
 		case '\n':
 			if err := c.echoPETSCIIByte('\r'); err != nil {
 				return "", err
 			}
-			return strings.TrimSpace(string(line)), nil
+			return finish()
 		case '\r':
-			// Commodore clients commonly send CR without LF. Peeking an empty
-			// socket would block until the full read deadline, so only consume
-			// LF when it is already buffered.
-			if c.Reader.Buffered() > 0 {
-				if next, err := c.Reader.Peek(1); err == nil && next[0] == '\n' {
-					_, _ = c.Reader.ReadByte()
-				}
-			}
+			c.afterCR = true
 			if err := c.echoPETSCIIByte('\r'); err != nil {
 				return "", err
 			}
-			return strings.TrimSpace(string(line)), nil
+			return finish()
 		case '\b', 0x14, 0x7f:
 			if len(line) > 0 {
 				line = line[:len(line)-1]
@@ -68,6 +77,19 @@ func (c *Connection) ReadLine() (string, error) {
 				}
 			}
 		default:
+			if character == '\t' {
+				character = ' '
+			}
+			if character < 0x20 {
+				continue
+			}
+			if tooLong {
+				continue
+			}
+			if len(line) >= 1024 {
+				tooLong = true
+				continue
+			}
 			line = append(line, c.petsciiInputByte(character))
 			if err := c.echoPETSCIIByte(character); err != nil {
 				return "", err
@@ -115,29 +137,44 @@ func (c *Connection) SendMessage(message string) error {
 
 // SendPrompt sends a prompt without a newline
 func (c *Connection) SendPrompt(prompt string) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petCyan + petsciiText(prompt) + petWhite + " ")
+	}
 	return c.send(c.Formatter.Colorize(prompt, ansi.UIPrompt))
 }
 
 // SendError sends an error message
 func (c *Connection) SendError(message string) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petRed + petLine(message) + petWhite)
+	}
 	formatted := c.Formatter.Colorize("ERROR: "+message, ansi.UIError)
 	return c.send(formatted + "\r\n")
 }
 
 // SendSuccess sends a success message
 func (c *Connection) SendSuccess(message string) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petGreen + petLine(message) + petWhite)
+	}
 	formatted := c.Formatter.Colorize(message, ansi.UISuccess)
 	return c.send(formatted + "\r\n")
 }
 
 // SendWarning sends a warning message
 func (c *Connection) SendWarning(message string) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petYellow + petLine(message) + petWhite)
+	}
 	formatted := c.Formatter.Colorize("WARNING: "+message, ansi.UIWarning)
 	return c.send(formatted + "\r\n")
 }
 
 // SendInfo sends an info message
 func (c *Connection) SendInfo(message string) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petCyan + petLine(message) + petWhite)
+	}
 	formatted := c.Formatter.Colorize(message, ansi.UIInfo)
 	return c.send(formatted + "\r\n")
 }
@@ -145,13 +182,10 @@ func (c *Connection) SendInfo(message string) error {
 // SendWelcome sends the initial welcome message
 func (c *Connection) SendWelcome() error {
 	if c.Presentation == PresentationPETSCII {
-		if err := c.sendPETSCII(petsciiWelcome()); err != nil {
-			return err
-		}
-		return c.SendInfo("COMMODORE DETECTED. PETSCII MODE ENABLED.")
+		return c.sendPETSCII(petsciiWelcome())
 	}
 
-	welcome := c.Formatter.Colorize("RACE CONDITION KINGDOM", ansi.UIInfo) + "\r\n"
+	welcome := c.Formatter.Colorize("SID64 QUEST", ansi.UIInfo) + "\r\n"
 	welcome += "A small telnet world is waiting on the other side of a web login.\r\n\r\n"
 	if err := c.send(welcome); err != nil {
 		return err
@@ -205,6 +239,9 @@ func (c *Connection) SendCharacterList(characters []*models.Character) error {
 		return c.SendError("No characters found.")
 	}
 
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(c.petsciiCharacters(characters))
+	}
 	var message strings.Builder
 	message.WriteString(c.Formatter.Colorize("🎭 CHARACTER SELECTION", ansi.UIInfo) + "\r\n\r\n")
 
@@ -244,6 +281,9 @@ func (c *Connection) SendGameWelcome() error {
 		return fmt.Errorf("no character selected")
 	}
 
+	if c.Presentation == PresentationPETSCII {
+		return nil
+	} // The room screen includes status.
 	var message strings.Builder
 
 	// Clear screen and show welcome
@@ -259,6 +299,9 @@ func (c *Connection) SendGameWelcome() error {
 
 // SendHelp sends the help message
 func (c *Connection) SendHelp() error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petsciiHelp())
+	}
 	help := `
 AVAILABLE COMMANDS
 
@@ -266,8 +309,8 @@ AVAILABLE COMMANDS
   north, n             Move north when an exit exists
   south, s             Move south when an exit exists
   east, e              Move east when an exit exists
-  west                 Move west when an exit exists
-  take, get <item>     Pick up an item
+  west, w              Move west when an exit exists
+  take, get <item|all> Pick up items
   drop <item>          Drop an item in the room
   use <item>           Drink a potion
   equip <item>         Wear armor or wield a weapon
@@ -276,7 +319,9 @@ AVAILABLE COMMANDS
   give <item> [name]   Hand an item to someone
   rest                 Recover health and stamina at an inn
   say <message>        Speak to everyone in the room
+  where                Show your location and exits
   who                  Show online players
+  terminal ansi|petscii Change terminal display
   stats, st            Show your character stats
   inventory, inv, i    Show your inventory
   help, h              Show this help
@@ -296,6 +341,9 @@ type OnlinePlayer struct {
 
 // SendWhoList sends the list of online players.
 func (c *Connection) SendWhoList(players []OnlinePlayer) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(petsciiWho(players))
+	}
 	whoList := c.Formatter.Colorize("👥 PLAYERS ONLINE", ansi.UIInfo) + "\r\n\r\n"
 	whoList += fmt.Sprintf("%-20s %-10s %s\r\n", "Name", "Level", "Location")
 	whoList += strings.Repeat("-", 50) + "\r\n"
@@ -311,6 +359,9 @@ func (c *Connection) SendWhoList(players []OnlinePlayer) error {
 
 // SendRoomDescription sends the current room description
 func (c *Connection) SendRoomDescription(npcs []string, items []string, others []string) error {
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(c.petsciiRoom(npcs, items, others))
+	}
 	return c.send(c.formatRoomDescription(npcs, items, others) + "\r\n")
 }
 
@@ -320,6 +371,9 @@ func (c *Connection) SendInventory(items []*models.InventoryItem) error {
 		return c.SendError("No character selected")
 	}
 
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(c.petsciiInventory(items))
+	}
 	inventory := c.Formatter.Colorize("🎒 INVENTORY", ansi.UIInfo) + "\r\n\r\n"
 	if len(items) == 0 {
 		inventory += "Your inventory is empty.\r\n"
@@ -353,6 +407,9 @@ func (c *Connection) SendStats() error {
 		return c.SendError("No character selected")
 	}
 
+	if c.Presentation == PresentationPETSCII {
+		return c.sendPETSCII(c.petsciiStats())
+	}
 	var stats strings.Builder
 	stats.WriteString(c.Formatter.Colorize("📊 CHARACTER STATISTICS", ansi.UIInfo) + "\r\n\r\n")
 
@@ -455,6 +512,9 @@ func (c *Connection) formatRoomDescription(npcs []string, items []string, others
 
 // formatPrompt formats the command prompt
 func (c *Connection) formatPrompt() string {
+	if c.Presentation == PresentationPETSCII {
+		return ">"
+	}
 	if c.Character == nil {
 		return "> "
 	}
@@ -479,7 +539,7 @@ func (c *Connection) Close() error {
 // send sends raw data to the connection
 func (c *Connection) send(data string) error {
 	if c.Presentation == PresentationPETSCII {
-		data = encodePETSCII(data)
+		data = petsciiText(data)
 	}
 	return c.write(data)
 }
@@ -613,6 +673,9 @@ func readTelnetSubnegotiation(reader *bufio.Reader) (byte, []byte, error) {
 		if err != nil {
 			return 0, nil, err
 		}
+		if len(data) >= 1024 {
+			return 0, nil, fmt.Errorf("telnet subnegotiation too long")
+		}
 		if character != telnetIAC {
 			data = append(data, character)
 			continue
@@ -641,39 +704,44 @@ func isTimeout(err error) bool {
 }
 
 func (c *Connection) readApplicationByte() (byte, error) {
-	character, err := c.Reader.ReadByte()
-	if err != nil || character != telnetIAC {
-		return character, err
-	}
-
-	command, err := c.Reader.ReadByte()
-	if err != nil {
-		return 0, err
-	}
-	if command == telnetIAC {
-		return telnetIAC, nil
-	}
-	if command == telnetSB {
-		_, _, err := readTelnetSubnegotiation(c.Reader)
-		return 0, err
-	}
-
-	// Negotiation commands are followed by an option byte and are not player
-	// input. Keep reading until a printable byte or line ending arrives.
-	if command == telnetWILL || command == telnetDO || command == 252 || command == 254 {
-		if _, err := c.Reader.ReadByte(); err != nil {
+	for {
+		character, err := c.Reader.ReadByte()
+		if err != nil || character != telnetIAC {
+			return character, err
+		}
+		command, err := c.Reader.ReadByte()
+		if err != nil {
 			return 0, err
 		}
+		if command == telnetIAC {
+			return telnetIAC, nil
+		}
+		if command == telnetSB {
+			if _, _, err := readTelnetSubnegotiation(c.Reader); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if command == telnetWILL || command == telnetDO || command == 252 || command == 254 {
+			if _, err := c.Reader.ReadByte(); err != nil {
+				return 0, err
+			}
+		}
 	}
-	return c.readApplicationByte()
 }
 
 func (c *Connection) petsciiInputByte(character byte) byte {
 	if c.Presentation != PresentationPETSCII {
 		return character
 	}
+	if character >= 0x41 && character <= 0x5a {
+		return 'a' + (character - 0x41)
+	}
+	if character >= 0x61 && character <= 0x7a {
+		return 'A' + (character - 0x61)
+	}
 	if character >= 0xc1 && character <= 0xda {
-		return 'a' + (character - 0xc1)
+		return 'A' + (character - 0xc1)
 	}
 	return character
 }

@@ -19,7 +19,7 @@ func NormalizeDirection(command string) string {
 		return "south"
 	case "e", "east":
 		return "east"
-	case "west":
+	case "west", "w":
 		return "west"
 	default:
 		return ""

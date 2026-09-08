@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
+	"github.com/tylerhardison/race-condition-kingdom/internal/account"
 	"github.com/tylerhardison/race-condition-kingdom/internal/auth"
 	"github.com/tylerhardison/race-condition-kingdom/internal/database"
 	"github.com/tylerhardison/race-condition-kingdom/internal/game"
@@ -97,6 +98,11 @@ func main() {
 	// Setup routes
 	router := mux.NewRouter()
 
+	// Browser account management shares the MUD's existing identity store.
+	accountHandler := account.New(db.GetPostgreSQLDB(), db.GetRedisClient(), authService, cfg)
+	for _, path := range []string{"/", "/account", "/account/style.css", "/login", "/signup"} {
+		router.Handle(path, accountHandler)
+	}
 	// Authentication routes
 	router.HandleFunc("/p/{code}", handler.handlePairingCode).Methods("GET")
 	router.HandleFunc("/pair", handler.handlePairingPage).Methods("GET")
@@ -107,6 +113,7 @@ func main() {
 	router.HandleFunc("/register", handler.handleRegisterSubmit).Methods("POST")
 	router.HandleFunc("/api/auth", handler.handleAPIAuth).Methods("POST")
 	router.HandleFunc("/health", handler.handleHealth).Methods("GET")
+	router.HandleFunc("/ready", authService.Ready).Methods("GET")
 
 	// Static files (if needed)
 	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
@@ -114,7 +121,7 @@ func main() {
 	// Create HTTP server
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.HTTPPort),
-		Handler:      router,
+		Handler:      authService.ProtectHTTP(router),
 		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
 	}
@@ -186,7 +193,7 @@ func (h *AuthHandler) renderPairingPage(w http.ResponseWriter, data pairingPageD
 func (h *AuthHandler) handleRegisterPage(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		http.Error(w, "Missing authentication token", http.StatusBadRequest)
+		http.Redirect(w, r, "/signup", http.StatusSeeOther)
 		return
 	}
 	if _, err := h.authService.ValidateAuthToken(token); err != nil {
@@ -479,7 +486,7 @@ func (h *AuthHandler) loadTemplates() error {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Race Condition Kingdom - Authentication</title>
+    <title>SID64 Quest - Authentication</title>
     <style>
         body { font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; margin: 0; padding: 20px; }
         .container { max-width: 500px; margin: 0 auto; background: #000; padding: 30px; border: 2px solid #00ff00; border-radius: 10px; }
@@ -495,7 +502,7 @@ func (h *AuthHandler) loadTemplates() error {
 </head>
 <body>
     <div class="container">
-        <div class="title">🏰 RACE CONDITION KINGDOM 🏰</div>
+        <div class="title">SID64 QUEST</div>
         <div class="info">Please enter your credentials to authenticate your telnet session.</div>
         
         {{if .Error}}
@@ -522,6 +529,7 @@ func (h *AuthHandler) loadTemplates() error {
         
         <div class="info">
             New here? <a href="/register?token={{.Token}}">Create an account and character.</a><br>
+ <a href="/account">Manage your account and characters</a><br>
             Local development account: admin / admin123
         </div>
     </div>
@@ -533,7 +541,7 @@ func (h *AuthHandler) loadTemplates() error {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Join Race Condition Kingdom</title>
+    <title>Join SID64 Quest</title>
     <style>
         body { font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; margin: 0; padding: 20px; }
         .container { max-width: 500px; margin: 0 auto; background: #000; padding: 30px; border: 2px solid #00ff00; border-radius: 10px; }
@@ -548,7 +556,7 @@ func (h *AuthHandler) loadTemplates() error {
 </head>
 <body>
     <div class="container">
-        <div class="title">JOIN THE KINGDOM</div>
+        <div class="title">BEGIN YOUR QUEST</div>
         <div class="info">Create one account and the character who will enter Town Square.</div>
         {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
         <form method="POST" action="/register">
@@ -586,6 +594,7 @@ func (h *AuthHandler) loadTemplates() error {
         <div class="info">You are now logged in as character: <span class="character">{{.CharacterName}}</span></div>
         <div class="info">You can now return to your telnet client and type 'check' to continue.</div>
         <div class="info">This window can be safely closed.</div>
+ <p><a href="/account">Manage your account and characters</a></p>
     </div>
 </body>
 </html>`
@@ -595,7 +604,7 @@ func (h *AuthHandler) loadTemplates() error {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pair Terminal - Race Condition Kingdom</title>
+    <title>Pair Terminal - SID64 Quest</title>
     <style>
         body { font-family: 'Courier New', monospace; background: #1a1a1a; color: #00ff00; margin: 0; padding: 20px; }
         .container { max-width: 500px; margin: 0 auto; background: #000; padding: 30px; border: 2px solid #00ff00; border-radius: 10px; }
@@ -617,6 +626,7 @@ func (h *AuthHandler) loadTemplates() error {
             <input id="code" name="code" value="{{.Code}}" placeholder="ABCD-EFGH" autocomplete="one-time-code" autocapitalize="characters" required autofocus>
             <button type="submit">CONTINUE</button>
         </form>
+        <p><a href="/account" style="color:#00ffff">Manage your account</a> · <a href="/signup" style="color:#00ffff">Create an account</a></p>
     </div>
 </body>
 </html>`

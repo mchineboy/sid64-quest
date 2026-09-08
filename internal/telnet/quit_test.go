@@ -64,6 +64,9 @@ func TestQuitCommandsReportDisconnectRatherThanFailure(t *testing.T) {
 		{"in game short", "q", server.handleGameCommandWithoutPrompt},
 		{"in game exit", "exit", server.handleGameCommandWithoutPrompt},
 		{"at username prompt", "quit", server.handleUsernameInput},
+		{"awaiting authentication", "exit", server.handleAuthWaiting},
+		{"choosing character", "quit", server.handleCharacterSelection},
+		{"choosing character uppercase", "Q", server.handleCharacterSelection},
 	}
 
 	for _, testCase := range cases {

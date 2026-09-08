@@ -4,3 +4,9 @@
 /coverage.html
 /cpu.prof
 /mem.prof
+
+.env
+.env.*
+!.env.example
+/backups/
+*.d64

@@ -3,7 +3,6 @@ package game
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
 
@@ -18,9 +17,6 @@ import (
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	cfg := config.LoadFromEnv()
-	if os.Getenv("POSTGRES_PASSWORD") == "" && cfg.Database.PostgreSQL.Password == "" {
-		cfg.Database.PostgreSQL.Password = "mud_password"
-	}
 	db, err := sql.Open("postgres", cfg.Database.PostgreSQL.ConnectionString())
 	if err != nil {
 		t.Skipf("postgres unavailable: %v", err)

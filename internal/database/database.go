@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	_ "github.com/lib/pq"
 
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 )
@@ -36,14 +36,23 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Database, error) {
 		return nil, fmt.Errorf("failed to initialize PostgreSQL: %w", err)
 	}
 
+	if err := Migrate(context.Background(), db.PostgreSQL); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	// Initialize Redis
 	if err := db.initRedis(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("failed to initialize Redis: %w", err)
 	}
 
 	// Initialize MongoDB
-	if err := db.initMongoDB(); err != nil {
-		return nil, fmt.Errorf("failed to initialize MongoDB: %w", err)
+	if cfg.Database.MongoDB.URI != "" {
+		if err := db.initMongoDB(); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to initialize MongoDB: %w", err)
+		}
 	}
 
 	return db, nil
@@ -52,7 +61,7 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Database, error) {
 // initPostgreSQL initializes the PostgreSQL connection
 func (d *Database) initPostgreSQL() error {
 	connStr := d.Config.Database.PostgreSQL.ConnectionString()
-	
+
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return fmt.Errorf("failed to open PostgreSQL connection: %w", err)
@@ -100,7 +109,7 @@ func (d *Database) initRedis() error {
 
 // initMongoDB initializes the MongoDB connection
 func (d *Database) initMongoDB() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 
+	ctx, cancel := context.WithTimeout(context.Background(),
 		time.Duration(d.Config.Database.MongoDB.Timeout)*time.Second)
 	defer cancel()
 

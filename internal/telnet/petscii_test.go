@@ -90,7 +90,7 @@ func TestNegotiateTerminalType(t *testing.T) {
 
 func TestEncodePETSCII(t *testing.T) {
 	got := encodePETSCII("Hello, adventurer…\r\n")
-	want := "HELLO, ADVENTURER...\r\r"
+	want := "\xc8ELLO, ADVENTURER...\r"
 	if got != want {
 		t.Errorf("encodePETSCII() = %q, want %q", got, want)
 	}
@@ -144,20 +144,20 @@ func TestReadLineEchoesPETSCIIAndHandlesDelete(t *testing.T) {
 	if got.err != nil {
 		t.Fatal(got.err)
 	}
-	if got.line != "ac" {
-		t.Fatalf("line = %q, want %q", got.line, "ac")
+	if got.line != "AC" {
+		t.Fatalf("line = %q, want %q", got.line, "AC")
 	}
 }
 
 func TestPETSCIIAuthInstructionsFitFortyByTwentyFive(t *testing.T) {
 	screen := petsciiAuthInstructions("http://symptom-pi:8080/pair", "9MDJ-XNAH")
 
-	if !strings.Contains(screen, "9MDJ-XNAH") {
+	if !strings.Contains(screen, encodePETSCII("9MDJ-XNAH")) {
 		t.Fatal("screen does not show the pairing code")
 	}
 
 	// Colour, charset, clear-screen and reverse-video codes occupy no column.
-	zeroWidth := map[byte]bool{0x05: true, 0x12: true, 0x8e: true, 0x92: true, 0x93: true, 0x9e: true, 0x9f: true}
+	zeroWidth := map[byte]bool{0x05: true, 0x12: true, 0x0e: true, 0x92: true, 0x93: true, 0x9e: true, 0x9f: true}
 
 	var rows []string
 	var row []byte
@@ -267,5 +267,32 @@ func TestReadTelnetSubnegotiation(t *testing.T) {
 	}
 	if option != telnetTTYPE || string(data) != string([]byte{ttypeIS, 'C', '6', '4'}) {
 		t.Errorf("readTelnetSubnegotiation() = (%d, %q), want terminal type C64", option, data)
+	}
+}
+
+func TestPETSCIIMixedCaseRoundTrip(t *testing.T) {
+	c := &Connection{Presentation: PresentationPETSCII}
+	const text = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz 0123456789"
+	encoded := encodePETSCII(text)
+	var decoded []byte
+	for _, b := range []byte(encoded) {
+		decoded = append(decoded, c.petsciiInputByte(b))
+	}
+	if string(decoded) != text {
+		t.Fatalf("round trip = %q", decoded)
+	}
+	if encodePETSCII("AaZz") != "\xc1\x41\xda\x5a" {
+		t.Fatal("incorrect letter byte mapping")
+	}
+	for b := byte(0x61); b <= 0x7a; b++ {
+		if c.petsciiInputByte(b) != 'A'+b-0x61 {
+			t.Fatal("uppercase alias decoded incorrectly")
+		}
+	}
+	if !strings.HasPrefix(petsciiWelcome(), "\x93\x0e") {
+		t.Fatal("welcome does not select mixed-case charset")
+	}
+	if strings.Contains(petsciiWelcome(), "\x8e") {
+		t.Fatal("welcome selects graphics charset")
 	}
 }

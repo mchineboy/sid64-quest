@@ -63,10 +63,12 @@ type Connection struct {
 	Cancel       context.CancelFunc
 	mutex        sync.RWMutex
 	writeMutex   sync.Mutex
+	afterCR      bool
 }
 
 // Server represents the telnet server
 type Server struct {
+	hub          *playerHub
 	config       *config.Config
 	authService  *auth.AuthService
 	eventBus     *events.EventBus
@@ -97,6 +99,7 @@ func newServer(cfg *config.Config, authService *auth.AuthService, eventBus *even
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Server{
+		hub:          newPlayerHub(),
 		config:       cfg,
 		authService:  authService,
 		eventBus:     eventBus,
@@ -193,11 +196,18 @@ func (s *Server) handleConnection(netConn net.Conn) {
 
 	// Add to connections map
 	s.connMutex.Lock()
+	if s.config.Server.MaxConnections > 0 && len(s.connections) >= s.config.Server.MaxConnections {
+		s.connMutex.Unlock()
+		conn.Close()
+		return
+	}
 	s.connections[connID] = conn
 	s.connMutex.Unlock()
 
 	// Remove from connections map when done
 	defer func() {
+		s.hub.remove(connID)
+		_ = s.authService.DeleteSession(connID)
 		s.connMutex.Lock()
 		delete(s.connections, connID)
 		s.connMutex.Unlock()
@@ -251,6 +261,12 @@ func (s *Server) connectionLoop(conn *Connection) {
 			// Read input from client
 			input, err := conn.ReadLine()
 			if err != nil {
+				if errors.Is(err, errLineTooLong) {
+					if conn.SendError("Command too long (maximum 1024 bytes). Please try again.") != nil {
+						return
+					}
+					continue
+				}
 				if err.Error() != "EOF" {
 					s.logger.WithError(err).Debug("Connection read error")
 				}
@@ -274,6 +290,19 @@ func (s *Server) connectionLoop(conn *Connection) {
 // processInput processes input based on the connection state
 func (s *Server) processInput(conn *Connection, input string) error {
 	input = strings.TrimSpace(input)
+	defer s.hub.update(conn)
+	if conn.State == StateInGame && conn.Session != nil {
+		active, err := s.authService.UserActive(conn.Context, conn.Session.UserID)
+		if err != nil || !active {
+			conn.SendMessage("Your session has ended. Please reconnect.")
+			return errQuit
+		}
+	}
+
+	parts := strings.Fields(input)
+	if len(parts) > 0 && strings.EqualFold(parts[0], "terminal") {
+		return s.handleTerminalCommand(conn, parts[1:])
+	}
 
 	switch conn.State {
 	case StateConnected:
@@ -294,8 +323,11 @@ func (s *Server) processInput(conn *Connection, input string) error {
 // handleInitialConnection handles the initial connection state
 func (s *Server) handleInitialConnection(conn *Connection) error {
 	conn.State = StateAwaitingUsername
-	conn.SendPrompt("Enter your username: ")
-	return nil
+	if conn.Presentation == PresentationPETSCII {
+		return conn.SendPrompt("Username>")
+	}
+	conn.SendMessage("Display: terminal ansi or terminal petscii")
+	return conn.SendPrompt("Enter your username: ")
 }
 
 // handleUsernameInput handles username input
@@ -347,12 +379,23 @@ func (s *Server) handleAuthWaiting(conn *Connection, input string) error {
 	input = strings.ToLower(input)
 
 	switch input {
+	case "qr":
+		if conn.Presentation == PresentationPETSCII {
+			screen, err := petsciiQRScreen(s.authService.GetPairingURL(conn.PairingCode))
+			if err != nil {
+				return conn.SendMessage("QR does not fit this screen. Type HELP for the URL.")
+			}
+			return conn.sendPETSCII(screen)
+		}
+		return conn.SendAuthInstructions(s.authService.GetPairingURL(conn.PairingCode), s.authService.GetPairingEntryURL(), conn.PairingCode)
 	case "help", "h":
 		pairingURL := s.authService.GetPairingURL(conn.PairingCode)
 		conn.SendAuthInstructions(pairingURL, s.authService.GetPairingEntryURL(), conn.PairingCode)
 	case "quit", "q", "exit":
 		conn.SendMessage("Goodbye!")
 		return errQuit
+	case "renew":
+		return s.handleUsernameInput(conn, conn.Username)
 	case "check", "c":
 		// Check if authentication is complete
 		return s.checkAuthentication(conn)
@@ -404,6 +447,13 @@ func (s *Server) checkAuthentication(conn *Connection) error {
 
 // handleCharacterSelection handles character selection
 func (s *Server) handleCharacterSelection(conn *Connection, input string) error {
+	switch strings.ToLower(input) {
+	case "quit", "q", "exit":
+		conn.SendMessage("Goodbye!")
+		return errQuit
+	case "check", "c":
+		return s.checkAuthentication(conn)
+	}
 	characters, err := s.authService.GetUserCharacters(conn.Session.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to get user characters: %w", err)
@@ -434,8 +484,13 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 	if err != nil {
 		return fmt.Errorf("load character room: %w", err)
 	}
+	if !s.hub.claim(conn.Character.ID, conn.ID) {
+		conn.Character = nil
+		return conn.SendError("That character is already online. Quit the other connection, then choose again.")
+	}
 	conn.Room = room
 	conn.State = StateInGame
+	s.hub.update(conn)
 
 	// Publish player connect event
 	event := events.PlayerConnectEvent(conn.Character.ID, conn.Character.Name)
@@ -482,7 +537,7 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		return errQuit
 	case "help", "h":
 		conn.SendHelp()
-	case "who", "w":
+	case "who":
 		s.sendWhoList(conn)
 	case "say":
 		if len(args) > 0 {
@@ -491,12 +546,14 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		} else {
 			conn.SendError("Say what?")
 		}
+	case "where":
+		return conn.SendMessage(fmt.Sprintf("You are in %s. Exits: %s.", conn.Room.Name, strings.Join(game.SortedExitNames(conn.Room.Exits), ", ")))
 	case "look", "l":
 		if len(args) == 0 {
 			return s.sendLook(conn)
 		}
 		return s.examineItem(conn, strings.Join(args, " "))
-	case "north", "n", "south", "s", "east", "e", "west":
+	case "north", "n", "south", "s", "east", "e", "west", "w":
 		return s.moveCharacter(conn, command)
 	case "take", "get":
 		if len(args) == 0 {
@@ -594,6 +651,7 @@ func (s *Server) moveCharacter(conn *Connection, direction string) error {
 	conn.Character.CurrentRoomID = &to.ID
 	conn.Character.Stamina = stamina
 	conn.Room = to
+	s.hub.update(conn)
 	if err := s.sendLook(conn); err != nil {
 		return err
 	}
@@ -629,13 +687,11 @@ func (s *Server) sendLook(conn *Connection) error {
 	}
 
 	others := make([]string, 0)
-	s.connMutex.RLock()
-	for _, other := range s.connections {
-		if other.ID != conn.ID && other.State == StateInGame && other.Room != nil && other.Room.ID == conn.Room.ID && other.Character != nil {
-			others = append(others, other.Character.Name)
+	for _, other := range s.hub.snapshots() {
+		if other.conn.ID != conn.ID && other.roomID == conn.Room.ID {
+			others = append(others, other.player.Name)
 		}
 	}
-	s.connMutex.RUnlock()
 	sort.Strings(others)
 
 	return conn.SendRoomDescription(npcNames, itemNames, others)
@@ -665,8 +721,46 @@ func (s *Server) examineItem(conn *Connection, query string) error {
 }
 
 func (s *Server) takeItem(conn *Connection, query string) error {
+	if strings.EqualFold(strings.TrimSpace(query), "all") {
+		items, err := s.world.TakeAll(conn.Context, conn.Character.ID, conn.Room.ID)
+		if err != nil {
+			return conn.SendError("You couldn't gather the items. Please try again.")
+		}
+		if len(items) == 0 {
+			ground, err := s.world.ListRoomItems(conn.Context, conn.Room.ID)
+			if err != nil {
+				return err
+			}
+			if len(ground) == 0 {
+				return conn.SendMessage("There is nothing here to take. Even your optimism won't fit in a pocket.")
+			}
+			return conn.SendMessage("Nothing you can take right now. Your pack may be full, or you already have the quest items.")
+		}
+		for _, item := range items {
+			name := item.Name
+			if item.Quantity > 1 {
+				name = fmt.Sprintf("%s x%d", name, item.Quantity)
+			}
+			s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s takes %s.", conn.Character.Name, name))
+		}
+		remaining, err := s.world.ListRoomItems(conn.Context, conn.Room.ID)
+		if err != nil {
+			return err
+		}
+		if len(remaining) > 0 {
+			return conn.SendMessage("Some items remain: your pack is full or you already carry that quest item.")
+		}
+		return nil
+	}
 	item, err := s.world.TakeItem(conn.Context, conn.Character.ID, conn.Room.ID, query)
 	if err != nil {
+		if errors.Is(err, game.ErrNoMatch) {
+			if message := sceneryTakeReply(conn.Room.Name, query); message != "" {
+				return conn.SendMessage(message)
+			}
+			return conn.SendError(fmt.Sprintf("You do not see %q here.", query))
+		}
+
 		conn.SendError(err.Error())
 		return nil
 	}
@@ -727,34 +821,18 @@ func (s *Server) giveItem(conn *Connection, args []string) error {
 }
 
 func (s *Server) sendWhoList(requester *Connection) {
-	s.connMutex.RLock()
-	players := make([]OnlinePlayer, 0, len(s.connections))
-	for _, conn := range s.connections {
-		if conn.State == StateInGame && conn.Character != nil && conn.Room != nil {
-			players = append(players, OnlinePlayer{
-				Name:     conn.Character.Name,
-				Level:    conn.Character.Level,
-				Location: conn.Room.Name,
-			})
-		}
+	players := []OnlinePlayer{}
+	for _, p := range s.hub.snapshots() {
+		players = append(players, p.player)
 	}
-	s.connMutex.RUnlock()
 	_ = requester.SendWhoList(players)
 }
-
 func (s *Server) broadcastToRoom(roomID uuid.UUID, message string) {
-	s.connMutex.RLock()
-	connections := make([]*Connection, 0)
-	for _, conn := range s.connections {
-		if conn.State == StateInGame && conn.Room != nil && conn.Room.ID == roomID {
-			connections = append(connections, conn)
-		}
-	}
-	s.connMutex.RUnlock()
-
-	for _, conn := range connections {
-		if err := conn.SendMessage(message); err != nil {
-			s.logger.WithError(err).Debug("Failed to broadcast room message")
+	for _, p := range s.hub.snapshots() {
+		if p.roomID == roomID {
+			if err := p.send(message); err != nil {
+				p.conn.Close()
+			}
 		}
 	}
 }
@@ -797,7 +875,10 @@ func (s *Server) cleanupInactiveConnections() {
 	defer s.connMutex.Unlock()
 
 	for id, conn := range s.connections {
-		if now.Sub(conn.LastActivity) > timeout {
+		conn.mutex.RLock()
+		lastActivity := conn.LastActivity
+		conn.mutex.RUnlock()
+		if now.Sub(lastActivity) > timeout {
 			s.logger.WithField("connection_id", id).Info("Cleaning up inactive connection")
 			conn.Close()
 			delete(s.connections, id)
@@ -814,12 +895,45 @@ func (s *Server) GetActiveConnections() int {
 
 // BroadcastMessage broadcasts a message to all connected players
 func (s *Server) BroadcastMessage(message string) {
-	s.connMutex.RLock()
-	defer s.connMutex.RUnlock()
-
-	for _, conn := range s.connections {
-		if conn.State == StateInGame {
-			conn.SendMessage(message)
+	for _, p := range s.hub.snapshots() {
+		if err := p.send(message); err != nil {
+			p.conn.Close()
 		}
 	}
+}
+
+// handleTerminalCommand is available throughout login and play, so a client
+// with a missing or incorrect terminal report can recover without reconnecting.
+func (s *Server) handleTerminalCommand(conn *Connection, args []string) error {
+	if len(args) != 1 || (!strings.EqualFold(args[0], "ansi") && !strings.EqualFold(args[0], "petscii")) {
+		return conn.SendMessage("Usage: terminal ansi | petscii")
+	}
+	presentation := presentationForTerminalType(args[0])
+	if presentation != conn.Presentation && !s.forcePETSCII {
+		command := byte(252) // WONT ECHO: return ANSI input to local echo.
+		if presentation == PresentationPETSCII {
+			command = telnetWILL
+		}
+		if err := conn.write(string([]byte{telnetIAC, command, telnetECHO})); err != nil {
+			return err
+		}
+	}
+	conn.SetTerminalType(args[0])
+	if err := conn.SendWelcome(); err != nil {
+		return err
+	}
+	switch conn.State {
+	case StateConnected, StateAwaitingUsername:
+		return s.handleInitialConnection(conn)
+	case StateAwaitingAuth:
+		return conn.SendAuthInstructions(s.authService.GetPairingURL(conn.PairingCode), s.authService.GetPairingEntryURL(), conn.PairingCode)
+	case StateAuthenticated:
+		return conn.SendPrompt("Type 'check' for characters, or 'quit': ")
+	case StateInGame:
+		if err := s.sendLook(conn); err != nil {
+			return err
+		}
+		return conn.SendPrompt(conn.formatPrompt())
+	}
+	return nil
 }

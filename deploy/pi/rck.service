@@ -1,0 +1,17 @@
+[Unit]
+Description=SID64 Quest private alpha
+Requires=docker.service tailscaled.service
+After=docker.service tailscaled.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/srv/rck
+User=tyler.hardison
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do ip -4 addr show tailscale0 | grep -q 100.67.213.90 && exit 0; sleep 2; done; exit 1'
+ExecStart=/usr/bin/docker compose up -d --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=320
+TimeoutStopSec=90
+[Install]
+WantedBy=multi-user.target

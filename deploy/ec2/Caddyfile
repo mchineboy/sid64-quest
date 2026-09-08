@@ -1,0 +1,6 @@
+# Activate only after DNS points to EC2 and its security group permits 80/443.
+sid64.quest {
+    reverse_proxy https://symptom-pi.tail8762f9.ts.net:8443 {
+        header_up Host {upstream_hostport}
+    }
+}

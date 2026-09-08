@@ -31,17 +31,19 @@ func presentationForTerminalType(terminalType string) Presentation {
 	return PresentationANSI
 }
 
-// encodePETSCII converts ordinary server text to the C64's boot-time
-// upper/graphics character set. Native PETSCII control and graphics bytes are
+// encodePETSCII converts ordinary server text to the C64 lowercase/uppercase
+// character set selected by CHR$(14). Native PETSCII control and graphics bytes are
 // written with sendPETSCII and deliberately bypass this conversion.
 func encodePETSCII(text string) string {
 	var result strings.Builder
 	result.Grow(len(text))
 
-	for _, character := range text {
+	for _, character := range strings.ReplaceAll(text, "\r\n", "\r") {
 		switch {
 		case character == '\r' || character == '\n':
 			result.WriteByte('\r')
+		case character >= 'A' && character <= 'Z':
+			result.WriteByte(byte(character - 'A' + 0xc1))
 		case character >= 'a' && character <= 'z':
 			result.WriteByte(byte(character - ('a' - 'A')))
 		case character >= ' ' && character <= '~':
@@ -57,90 +59,33 @@ func encodePETSCII(text string) string {
 }
 
 func petsciiWelcome() string {
-	const (
-		clearScreen = "\x93"
-		// Select the uppercase/graphics charset. encodePETSCII folds text to
-		// uppercase and the banner uses codes 0x6a-0x6c as line graphics, both
-		// of which require this mode rather than the shifted one.
-		upperCharset = "\x8e"
-		cyan         = "\x9f"
-		white        = "\x05"
-		reverseOn    = "\x12"
-		reverseOff   = "\x92"
-		block        = "\xa0"
-		graphicA     = "\x6a"
-		graphicB     = "\x6b"
-		graphicC     = "\x6c"
-	)
-
-	border := strings.Repeat(block, 40)
-	graphics := strings.Repeat(graphicA+graphicB+graphicC, 13) + graphicA
-
-	return clearScreen + upperCharset + cyan + border + "\r" +
-		white + reverseOn + " RACE CONDITION KINGDOM             " + reverseOff + "\r" +
-		cyan + graphics + "\r" +
-		white + " A TELNET MUD FOR A 40-COLUMN REALM. \r" +
-		cyan + border + "\r\r"
+	return petHeading("SID64 Quest") + "\r" +
+		petLine("A small world. A new adventure.") + "\r" +
+		petLine("Enter your username to begin.") +
+		petLine("New players can create an account in") +
+		petLine("the browser sign-in step.") + "\r" +
+		petCyan + petLine("Display: TERMINAL ANSI / PETSCII") +
+		petLine("QUIT leaves the game.") + "\r" + petWhite
 }
 
 // petsciiAuthInstructions draws the sign-in screen for a 40x25 Commodore
 // screen.
 //
-// It deliberately carries no QR code. The smallest QR symbol is 21x21 modules
-// and needs a 4-module quiet zone, so 29x29. A Commodore character cell is
-// roughly square, so square QR modules cost one cell each, and 29 rows do not
-// fit in 25. Packing two modules per cell fits the height but halves module
-// height, and scanners reject the resulting 2:1 modules. The pairing code is
-// therefore the primary path here, and it is drawn large and centred.
+// QR opens a separate compact quadrant-block screen; HELP retains the URL fallback.
 func petsciiAuthInstructions(entryURL, pairingCode string) string {
-	const (
-		clearScreen  = "\x93"
-		upperCharset = "\x8e"
-		white        = "\x05"
-		cyan         = "\x9f"
-		yellow       = "\x9e"
-		reverseOn    = "\x12"
-		reverseOff   = "\x92"
-		border       = "\xa0"
-	)
-
-	var screen strings.Builder
-	screen.WriteString(clearScreen + upperCharset)
-
-	screen.WriteString(cyan + strings.Repeat(border, 40) + "\r")
-	screen.WriteString(white + centerPETSCIILine("SIGN IN TO PLAY", 40) + "\r")
-	screen.WriteString(cyan + strings.Repeat(border, 40) + "\r\r")
-
-	screen.WriteString(white + " 1. OPEN THIS ON A PHONE OR PC:\r\r")
-	screen.WriteString(cyan + wrapPETSCII("    "+strings.ToUpper(entryURL), 40) + "\r")
-
-	screen.WriteString(white + " 2. ENTER THIS CODE:\r\r")
-	// Reverse video must cover only the code, not the centring whitespace.
-	code := " " + strings.ToUpper(pairingCode) + " "
-	screen.WriteString(yellow + strings.Repeat(" ", (40-len(code))/2))
-	screen.WriteString(reverseOn + code + reverseOff + "\r\r")
-
-	screen.WriteString(white + " 3. TYPE  CHECK  HERE WHEN DONE.\r\r")
-	screen.WriteString(cyan + centerPETSCIILine("CODE EXPIRES IN 5 MINUTES", 40) + "\r")
-	screen.WriteString(white)
-	return screen.String()
-}
-
-func centerPETSCIILine(text string, width int) string {
-	if len(text) >= width {
-		return text
+	code := " " + pairingCode + " "
+	padding := (petsciiTextWidth - len(code)) / 2
+	if padding < 0 {
+		padding = 0
 	}
-	return strings.Repeat(" ", (width-len(text))/2) + text
-}
-
-func wrapPETSCII(text string, width int) string {
-	var output strings.Builder
-	for len(text) > width {
-		output.WriteString(text[:width])
-		output.WriteByte('\r')
-		text = text[width:]
-	}
-	output.WriteString(text)
-	output.WriteByte('\r')
-	return output.String()
+	return petHeading("Sign in to play") + "\r" +
+		petLine("1. On your phone or computer, open:") +
+		petCyan + petLine(entryURL) + "\r" +
+		petWhite + petLine("2. Sign in with this pairing code:") + "\r" +
+		petYellow + strings.Repeat(" ", padding) + "\x12" +
+		petsciiText(code) + "\x92\r\r" +
+		petWhite + petLine("3. Return here and type CHECK.") + "\r" +
+		petCyan + petLine("The code expires in 5 minutes.") +
+		petLine("QR to scan. HELP repeats. QUIT exits.") + "\r" +
+		petWhite + encodePETSCII("Check> ")
 }

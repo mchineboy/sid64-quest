@@ -30,6 +30,9 @@ func (ws *WorldService) EnsureStarterWorld(ctx context.Context) error {
 		return fmt.Errorf("begin starter world setup: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(72632002)`); err != nil {
+		return err
+	}
 
 	rooms := []struct {
 		name, description, shortDescription, roomType string

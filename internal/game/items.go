@@ -87,7 +87,7 @@ func (ws *WorldService) TakeItem(ctx context.Context, characterID, roomID uuid.U
 	chosen, err := findNamed(ground, query, func(item GroundItem) string { return item.Name })
 	if err != nil {
 		if errors.Is(err, ErrNoMatch) {
-			return nil, fmt.Errorf("you do not see %q here", query)
+			return nil, fmt.Errorf("%w: you do not see %q here", ErrNoMatch, query)
 		}
 		if errors.Is(err, ErrAmbiguous) {
 			return nil, fmt.Errorf("%q is ambiguous", query)
@@ -308,7 +308,7 @@ func (ws *WorldService) listRoomItemsTx(ctx context.Context, tx *sql.Tx, roomID 
 		FROM room_items ri
 		JOIN items i ON i.id = ri.item_id
 		WHERE ri.room_id = $1
-		ORDER BY i.name`, roomID)
+		ORDER BY i.name, ri.item_id FOR UPDATE OF ri`, roomID)
 	if err != nil {
 		return nil, fmt.Errorf("list room items: %w", err)
 	}
@@ -400,4 +400,60 @@ func requireCharacterInRoom(ctx context.Context, tx *sql.Tx, characterID, roomID
 		return fmt.Errorf("you are not in that room")
 	}
 	return nil
+}
+
+// TakeAll transfers available stacks atomically, respecting capacity and quest uniqueness.
+func (ws *WorldService) TakeAll(ctx context.Context, characterID, roomID uuid.UUID) ([]GroundItem, error) {
+	tx, err := ws.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err = requireCharacterInRoom(ctx, tx, characterID, roomID); err != nil {
+		return nil, err
+	}
+	ground, err := ws.listRoomItemsTx(ctx, tx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	var count int
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(quantity),0) FROM inventory WHERE character_id=$1`, characterID).Scan(&count); err != nil {
+		return nil, err
+	}
+	var taken []GroundItem
+	for _, item := range ground {
+		quantity := min(item.Quantity, maxInventorySize-count)
+		if quantity <= 0 {
+			continue
+		}
+		if propertyBool(item.Item.Properties, "quest") {
+			var owned int
+			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory WHERE character_id=$1 AND item_id=$2`, characterID, item.ItemID).Scan(&owned); err != nil {
+				return nil, err
+			}
+			if owned > 0 {
+				continue
+			}
+			quantity = 1
+		}
+		if quantity == item.Quantity {
+			_, err = tx.ExecContext(ctx, `DELETE FROM room_items WHERE room_id=$1 AND item_id=$2`, roomID, item.ItemID)
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE room_items SET quantity=quantity-$3 WHERE room_id=$1 AND item_id=$2`, roomID, item.ItemID, quantity)
+		}
+		if err != nil {
+			return nil, err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO inventory(character_id,item_id,quantity) VALUES($1,$2,$3) ON CONFLICT(character_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity`, characterID, item.ItemID, quantity)
+		if err != nil {
+			return nil, err
+		}
+		item.Quantity = quantity
+		taken = append(taken, item)
+		count += quantity
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return taken, nil
 }

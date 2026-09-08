@@ -276,3 +276,12 @@ func ExampleAuthService_usage() {
 	_ = logger
 
 }
+
+func TestPairingChallengeCannotBeReplayed(t *testing.T) {
+	cfg := config.LoadFromEnv()
+	service := newTestAuthService(t, cfg)
+	token, _, err := service.GenerateAuthChallenge("replay-test")
+	require.NoError(t, err)
+	require.NoError(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New()))
+	require.Error(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New()))
+}

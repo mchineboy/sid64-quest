@@ -1,0 +1,10 @@
+[Unit]
+Description=SID64 Quest database backup
+Requires=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/srv/rck/backup.sh
+User=tyler.hardison
+WorkingDirectory=/srv/rck
+UMask=0077

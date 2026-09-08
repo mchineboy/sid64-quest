@@ -1,8 +1,8 @@
-# Race Condition Kingdom - MUD Architecture Plan
+# SID64 Quest - MUD Architecture Plan
 
 ## 🎯 Project Overview
 
-Race Condition Kingdom is a modern MUD (Multi-User Dungeon) written in Go, built around nostalgia for telnet-based gameplay but modernized with out-of-band HTTPS authentication, extensibility, and balance-focused gameplay design.
+SID64 Quest is a modern MUD (Multi-User Dungeon) written in Go, built around nostalgia for telnet-based gameplay but modernized with out-of-band HTTPS authentication, extensibility, and balance-focused gameplay design.
 
 ## 🏗️ High-Level System Architecture
 

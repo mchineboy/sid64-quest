@@ -1,4 +1,4 @@
-# Race Condition Kingdom - Makefile
+# SID64 Quest - Makefile
 
 # Go parameters
 GOCMD=go

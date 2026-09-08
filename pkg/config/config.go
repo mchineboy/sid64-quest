@@ -117,7 +117,7 @@ func LoadFromEnv() *Config {
 				MaxConns: getEnvInt("POSTGRES_MAX_CONNS", 25),
 			},
 			MongoDB: MongoDBConfig{
-				URI:      getEnvString("MONGODB_URI", "mongodb://localhost:27017"),
+				URI:      os.Getenv("MONGODB_URI"),
 				Database: getEnvString("MONGODB_DB", "race_condition_kingdom_logs"),
 				Timeout:  getEnvInt("MONGODB_TIMEOUT", 10),
 			},
@@ -133,7 +133,7 @@ func LoadFromEnv() *Config {
 			TokenExpiry:   time.Duration(getEnvInt("AUTH_TOKEN_EXPIRY", 300)) * time.Second,
 			SessionExpiry: time.Duration(getEnvInt("AUTH_SESSION_EXPIRY", 86400)) * time.Second,
 			BaseURL:       getEnvString("AUTH_BASE_URL", "http://localhost:8080"),
-			SecretKey:     getEnvString("AUTH_SECRET_KEY", "change-me-in-production"),
+			SecretKey:     os.Getenv("AUTH_SECRET_KEY"),
 			BCryptCost:    getEnvInt("BCRYPT_COST", 12),
 		},
 		Discord: DiscordConfig{
