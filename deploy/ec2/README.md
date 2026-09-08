@@ -24,3 +24,37 @@ Public-port verification: after the EC2 security-group update, direct connection
 ## Public endpoint activation — 2026-09-08
 
 `sid64.quest` resolves to EC2 at `52.34.32.84`. Caddy is enabled with public HTTPS; HAProxy forwards ports 2323 and 6464 to the Pi. AUTH_BASE_URL is now `https://sid64.quest`. Public users and QR-scanning phones no longer need Tailscale. Earlier private-only instructions describe the previous deployment. The existing Pi ts.net routes are preserved.
+
+## Terminal transport keep-alive
+
+HAProxy enables TCP keep-alive independently on the client and Pi connections:
+30 seconds idle before probing, 10 seconds between unanswered probes, and nine
+unanswered probes before declaring a dead peer. Successful probes are invisible
+to ANSI and raw PETSCII clients. The edge's own TCP keep-alive only covers its
+connection to HAProxy, not the public client connection. See the
+[HAProxy 3.0 keep-alive documentation](https://docs.haproxy.org/3.0/configuration.html#4.2-option%20tcpka).
+
+These transport probes do not override the edge's intentional 15-minute player
+idle logout or HAProxy's 16-minute application inactivity timeout. Do not claim
+they can repair a lost network or a modem's independent idle/disconnect policy.
+
+Validate with `sudo haproxy -c -f /etc/haproxy/haproxy.cfg`, then use
+`sudo systemctl reload haproxy` (not restart). Existing connections drain in the
+old worker without being disconnected; only new connections get new socket
+settings. Verify both public ports and inspect `sudo ss -tnopi` for
+`timer:(keepalive,...)` on both proxy legs. Keep a backup of the prior config.
+
+Applied on 2026-09-08 with HAProxy 3.0.11 validation and a graceful reload.
+The existing PETSCII connection remained established in the old worker. New
+ANSI/PETSCII connections showed keep-alive timers on both proxy legs and
+successful client-side probes with unchanged application byte counts. Both
+public sockets survived 75 seconds without client input and answered input
+afterwards. No edge/core restart or database change was needed. This verifies
+the server behavior, not the cause of a particular modem's “no carrier” report.
+Previous config: `/etc/haproxy/haproxy.cfg.pre-keepalive-20260908`.
+
+Repeat the idle smoke check from outside the tailnet:
+
+```sh
+python3 scripts/test-terminal-keepalive.py --host sid64.quest --seconds 75
+```
