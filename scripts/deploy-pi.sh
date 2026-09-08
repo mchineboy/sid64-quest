@@ -3,6 +3,12 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
+# This script replaces the legacy gateway. Once the persistent edge is installed,
+# releases must update an inactive core slot instead of recreating the whole stack.
+if ssh tyler.hardison@symptom-pi 'test -f /srv/rck/edge-control/target'; then
+  echo 'Persistent edge is installed. Use the core-slot rollout in docs/BLUE-GREEN-DEPLOYMENTS.md.' >&2
+  exit 1
+fi
 # Applied migrations are immutable, including comments and whitespace. Check
 # before touching the running image so drift cannot take the service offline.
 migration_checksums=$(ssh tyler.hardison@symptom-pi 'cd /srv/rck && docker compose exec -T postgres psql -X -U mud_user -d race_condition_kingdom -At -F " " -c "SELECT version,checksum FROM schema_migrations ORDER BY version"')

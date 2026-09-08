@@ -9,8 +9,8 @@ RemainAfterExit=true
 WorkingDirectory=/srv/rck
 User=tyler.hardison
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do ip -4 addr show tailscale0 | grep -q 100.67.213.90 && exit 0; sleep 2; done; exit 1'
-ExecStart=/usr/bin/docker compose up -d --wait --wait-timeout 180
-ExecStop=/usr/bin/docker compose stop
+ExecStart=/usr/bin/docker compose -f compose.edge.yml up -d --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose -f compose.edge.yml stop
 TimeoutStartSec=320
 TimeoutStopSec=90
 [Install]

@@ -109,15 +109,21 @@ the same user. Keep TCP cores on loopback/private networks, or behind TLS.
 
 ## Pi deployment boundary
 
-Production is not automatically migrated. `scripts/deploy-pi.sh`, `compose.yml`
-and `rck.service` still run the legacy gateway and interrupt its sessions. Its
+Production is not automatically migrated. `scripts/deploy-pi.sh` and `compose.yml`
+describe the legacy gateway; the deploy script refuses to replace an installed
+persistent edge. The supplied `rck.service` boots `compose.edge.yml`. The legacy
+gateway's
 `SIGUSR1` drain keeps the entire old process alive and is separate from the new
 core replacement mechanism.
 
 `deploy/pi/compose.edge.yml` is an opt-in replacement using the same `rck`
 project and database volumes. Pin `EDGE_IMAGE`, `CORE_BLUE_IMAGE`,
 `CORE_GREEN_IMAGE`, and `AUTH_IMAGE` to release tags in the Pi environment and
-set `CORE_TOKEN`. Build images with all binaries listed in `deploy/pi/Dockerfile`.
+set `CORE_TOKEN`. The initial migration helper `configure-edge.py --release rck:REVISION`
+preserves the Pi's existing secrets, backs up its environment, generates the
+private core token, and pins these images. It sets `COMPOSE_FILE=compose.edge.yml`
+so ordinary Compose, backup and restore-check commands select the new topology.
+Build images with all binaries listed in `deploy/pi/Dockerfile`.
 Never retag/recreate the edge as part of a routine core release.
 
 The initial move needs one announced disconnect: old sockets belong to the
