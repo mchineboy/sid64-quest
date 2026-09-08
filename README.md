@@ -93,7 +93,8 @@ EC2 public gateway — sid64.quest
         | Tailscale
         v
 Raspberry Pi — symptom-pi
-  Auth/account service + terminal gateway
+  Auth/account service + persistent terminal edge
+  Blue/green game cores
   PostgreSQL + Redis
 ```
 
@@ -106,16 +107,16 @@ Operational work completed:
 - Atomic, single-use browser pairing; shared terminal presence and duplicate-character-session prevention.
 - HTTP readiness checks against PostgreSQL and Redis, container health checks, and service startup configuration.
 - Daily PostgreSQL backups on the Pi, scheduled checksum-verified copies to the operator's Mac, and successful disposable-database restore rehearsals.
-- An ARM64 deployment script that takes a backup and retains the previous application image.
+- Pinned ARM64 releases, persistent terminal sockets, and blue/green core switching with retained rollback images.
 - Operator account listing, disable/enable, and password-reset commands.
 
-The deployed world is separate from local development data. Deployment interrupts active terminal sessions.
+The deployed world is separate from local development data. Production uses a
+persistent terminal edge: core restarts and blue/green switches preserve
+ANSI/PETSCII sockets, with durable session recovery and command deduplication.
+Restarting the edge or the entire stack still disconnects terminals. See
+[the deployment and local testing guide](docs/BLUE-GREEN-DEPLOYMENTS.md).
 
-An opt-in persistent terminal edge now supports core restarts and blue/green
-switches without dropping ANSI/PETSCII sockets, with durable session recovery
-and command deduplication. See [the deployment and local testing guide](docs/BLUE-GREEN-DEPLOYMENTS.md).
-
-Read the [operator runbook](docs/ALPHA-RUNBOOK.md), [Pi configuration](deploy/pi/compose.yml), and [EC2 gateway notes](deploy/ec2/README.md) before operating the deployment.
+Read the [operator runbook](docs/ALPHA-RUNBOOK.md), [Pi configuration](deploy/pi/compose.edge.yml), and [EC2 gateway notes](deploy/ec2/README.md) before operating the deployment.
 
 ## Development
 

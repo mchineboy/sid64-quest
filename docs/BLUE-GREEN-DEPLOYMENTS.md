@@ -109,14 +109,15 @@ the same user. Keep TCP cores on loopback/private networks, or behind TLS.
 
 ## Pi deployment boundary
 
-Production is not automatically migrated. `scripts/deploy-pi.sh` and `compose.yml`
+Production migrated from `main` revision `6d0e7d0` on 2026-09-08. Public
+ANSI/PETSCII sessions survived a live blue→green→blue switch; see the runbook for
+the release record and rollback artifacts. `scripts/deploy-pi.sh` and `compose.yml`
 describe the legacy gateway; the deploy script refuses to replace an installed
-persistent edge. The supplied `rck.service` boots `compose.edge.yml`. The legacy
-gateway's
-`SIGUSR1` drain keeps the entire old process alive and is separate from the new
+persistent edge. The installed `rck.service` boots `compose.edge.yml`. The legacy
+gateway's `SIGUSR1` drain keeps the entire old process alive and is separate from the new
 core replacement mechanism.
 
-`deploy/pi/compose.edge.yml` is an opt-in replacement using the same `rck`
+`deploy/pi/compose.edge.yml` is the production topology using the same `rck`
 project and database volumes. Pin `EDGE_IMAGE`, `CORE_BLUE_IMAGE`,
 `CORE_GREEN_IMAGE`, and `AUTH_IMAGE` to release tags in the Pi environment and
 set `CORE_TOKEN`. The initial migration helper `configure-edge.py --release rck:REVISION`
@@ -126,9 +127,10 @@ so ordinary Compose, backup and restore-check commands select the new topology.
 Build images with all binaries listed in `deploy/pi/Dockerfile`.
 Never retag/recreate the edge as part of a routine core release.
 
-The initial move needs one announced disconnect: old sockets belong to the
+For another installation, the initial move needs one announced disconnect: old sockets belong to the
 monolithic gateway. After a backup, stop/remove only that gateway to free its
-ports, create `/srv/rck/edge-control` owned by container UID/GID 65532, and run
+ports, create `/srv/rck/edge-control` owned by container UID/GID 65532 with mode
+0755 (so the host operator can check for the target file), and run
 `docker compose -f compose.edge.yml up -d --wait`. Use this Compose file for all
 subsequent operations and update `rck.service` before rebooting. Mount the control
 directory, not a single target file, so atomic renames are visible to the edge.

@@ -1,11 +1,17 @@
 # SID64 Quest alpha operations
 
-Host: `ssh tyler.hardison@symptom-pi` (Debian ARM64, hostname modeburner). Deployment: `/srv/rck`. One gateway process owns presence for both terminal modes; do not scale gateway replicas.
+Host: `ssh tyler.hardison@symptom-pi` (Debian ARM64, hostname modeburner).
+Deployment: `/srv/rck`, using `compose.edge.yml`. One persistent edge owns both
+terminal listeners; interchangeable blue/green cores share durable sessions.
+See [connection-preserving core deployments](BLUE-GREEN-DEPLOYMENTS.md).
 
-An opt-in persistent edge/core topology is available; see
-[connection-preserving core deployments](BLUE-GREEN-DEPLOYMENTS.md). It needs an
-explicit initial migration from the legacy gateway. The commands below still
-stop the whole stack and must not be used for core-only rollouts afterward.
+Production migrated on 2026-09-08 at 16:45 Pacific from clean `main` revision
+`6d0e7d08543ef6d9c1f837a840d77ca48530b8bc`, image `rck:6d0e7d0`.
+The terminal check immediately before cutover found zero established connections.
+Both core slots, edge and auth use this pinned release; blue is the active target.
+Public HTTPS signup/pairing, ANSI/PETSCII play and a blue→green→blue switch passed
+with the same edge container and authenticated sockets. The two temporary smoke
+accounts were removed, leaving the three original characters.
 
 Public web: https://sid64.quest/account
 Public ANSI: `sid64.quest:2323`; public PETSCII: `sid64.quest:6464`.
@@ -13,29 +19,60 @@ The private `symptom-pi` endpoints remain available for operator diagnostics ove
 
 ## Deploy and inspect
 
-From the project on the Mac, source the development environment and run `go test -race -count=1 ./...` and `go vet ./...`. Then run `scripts/deploy-pi.sh`. It checks all applied migration checksums against the source before changing the running release, builds ARM64 binaries, takes a pre-deploy backup, retains the current image as `rck:previous`, and waits for healthy containers. Deployment interrupts terminal sessions. It never copies the local `.env`.
+Build from clean, pushed `main`. Source the local development environment and run
+`make test-core-restart`, `go test -race -count=1 ./...`, and `go vet ./...`.
+Check applied migration checksums, take a backup, and build/upload an explicitly
+tagged ARM64 release with `deploy/pi/Dockerfile`. Never copy the Mac's `.env`.
+The old `scripts/deploy-pi.sh` refuses to overwrite the installed edge.
+
+Change only the inactive core slot's image in the Pi's `.env`, start it with
+`docker compose up -d --no-deps --wait core-green`, then switch with
+`docker compose exec -T core-green /app/core-switch -target http://core-green:8082 -file /control/target`.
+Reverse the slot names when green is active. Keep `EDGE_IMAGE` pinned through
+core-only releases. Auth can be updated separately without replacing the edge.
 
 On the Pi:
 
 ```sh
 cd /srv/rck
 docker compose ps
-docker compose logs --tail=100 auth gateway
+docker compose logs --tail=100 auth edge core-blue core-green
+docker compose exec -T edge cat /control/target
 sudo systemctl status rck.service rck-backup.timer
 curl --fail http://127.0.0.1:8081/ready
 ```
 
-`rck.service` waits for the Tailscale address before starting the stack at boot. `sudo systemctl restart rck.service` restarts only the MUD stack. Containers also have restart policies. `/ready` checks PostgreSQL and Redis; gateway health checks both listeners. Logs rotate for application containers. Check disk use periodically, including database logs and backups.
+`rck.service` explicitly selects `compose.edge.yml` and waits for Tailscale at
+boot. The Pi `.env` also selects it through `COMPOSE_FILE`, including for backup
+commands. `sudo systemctl restart rck.service` restarts the entire MUD stack and
+**drops terminal connections**; use core-slot switching for deployments instead.
+Containers have restart policies. Auth/core readiness checks PostgreSQL and
+Redis; edge health checks both terminal listeners. Logs rotate. Check disk use,
+including database logs and backups, periodically.
 
-If a code release fails and its migrations are compatible with the previous code:
+If a core release fails and blue is the retained, compatible previous version:
 
 ```sh
 cd /srv/rck
-docker tag rck:previous rck:alpha
-docker compose up -d --force-recreate --wait
+docker compose up -d --no-deps --wait core-blue
+docker compose exec -T core-blue /app/core-switch -target http://core-blue:8082 -file /control/target
 ```
 
 Database migrations are numbered, embedded, checksum-checked and transactional. Never edit an applied migration. A code rollback does not undo a migration. Review schema compatibility before rolling back.
+
+Initial migration rollback artifacts are retained: image `rck:pre-edge-5143cb1`,
+private `.env.pre-edge`, the stopped legacy gateway container, and original
+Compose/service files in `releases/6d0e7d0/`. Returning to the legacy gateway
+would disconnect terminals and requires restoring its environment/service unit.
+The pre-migration backup `backups/20260908T234255Z.dump` passed a disposable
+restore rehearsal. Post-migration backup: `backups/20260908T234725Z.dump`.
+
+For current gameplay presence, use in-game `who`. Operator-side checkpoint
+presence can be inspected without a login (leases may lag disconnects):
+
+```sh
+docker compose exec -T postgres psql -X -U mud_user -d race_condition_kingdom -c "SELECT checkpoint->>'Username' AS username, checkpoint->'Character'->>'name' AS character, last_seen FROM terminal_sessions WHERE NOT closed AND last_seen > now()-interval '2 minutes' ORDER BY last_seen DESC"
+```
 
 ## Accounts
 
