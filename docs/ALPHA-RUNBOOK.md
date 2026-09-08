@@ -8,7 +8,7 @@ The private `symptom-pi` endpoints remain available for operator diagnostics ove
 
 ## Deploy and inspect
 
-From the project on the Mac, source the development environment and run `go test -race -count=1 ./...` and `go vet ./...`. Then run `scripts/deploy-pi.sh`. It builds ARM64 binaries, takes a pre-deploy backup, retains the current image as `rck:previous`, and waits for healthy containers. Deployment interrupts terminal sessions. It never copies the local `.env`.
+From the project on the Mac, source the development environment and run `go test -race -count=1 ./...` and `go vet ./...`. Then run `scripts/deploy-pi.sh`. It checks all applied migration checksums against the source before changing the running release, builds ARM64 binaries, takes a pre-deploy backup, retains the current image as `rck:previous`, and waits for healthy containers. Deployment interrupts terminal sessions. It never copies the local `.env`.
 
 On the Pi:
 
@@ -41,6 +41,16 @@ docker compose exec -T auth /app/rck-admin list
 docker compose exec -T auth /app/rck-admin disable USERNAME
 docker compose exec -T auth /app/rck-admin enable USERNAME
 ```
+
+To enable in-game contributions, have the contributor create a normal account, then grant builder permission:
+
+```sh
+docker compose exec -T auth /app/rck-admin grant-builder USERNAME
+```
+
+Builders use `script new`, `script edit`, and `script test` in their terminal. They can edit only their own drafts and cannot change the live world. An admin uses `script list` and `script show <id>` to review, `script publish <id> <revision>` to approve the reviewed source, and `script attach <id> <target-id|here>` to activate it on an object. There is no submission queue yet; contributors share the script ID with the reviewer.
+
+Use `grant-admin USERNAME` only for trusted reviewers. `revoke-builder USERNAME` or `revoke-admin USERNAME` takes effect on the next scripting operation, including a save from an open editor. Removing builder permission does not remove a separate admin permission. `script disable <id>` stops an already-published script; revoking its author's access alone does not unpublish approved content. See [the scripting guide](SCRIPTING.md) for the full workflow and limits.
 
 For a password reset, use Bash and a hidden prompt, keeping the password out of command arguments and history:
 
@@ -92,3 +102,10 @@ Terminal listeners now use `MUD_BIND_IP=0.0.0.0` on the Pi for LAN and tailnet a
 ## Public endpoint activation — 2026-09-08
 
 `sid64.quest` resolves to EC2 at `52.34.32.84`. Caddy is enabled with public HTTPS; HAProxy forwards ports 2323 and 6464 to the Pi. AUTH_BASE_URL is now `https://sid64.quest`. Public users and QR-scanning phones no longer need Tailscale. Earlier private-only instructions describe the previous deployment. The existing Pi ts.net routes are preserved.
+
+
+## Scripting release — 2026-09-08
+
+Starlark scripting and migration `003_scripting.sql` are deployed. The final release used pre-deploy backup `20260908T221603Z.dump` and image `sha256:c0ae7182a2c97dbb39f6ff4d4f83c79c559211d3907e5c2a55c2ca510336a7de`. Public HTTPS signup/pairing and the contributor workflow were verified through both ANSI and PETSCII: draft editing, isolated preview, builder restrictions, admin publication, attachment, live execution, immediate revocation, disable and detach. Verification used disposable accounts and an isolated room; all test data was removed.
+
+The first attempt stopped at a checksum mismatch in the original migration. The previous image was restored, and the exact `001_initial.sql` was recovered from its embedded copy: its original project-name comment and trailing blank line must remain unchanged. No recorded database checksum was rewritten. The deploy script now checks applied migration hashes before replacing services. Live verification also exposed an unset legacy account field; scripting now uses the authenticated character's owner, with regression coverage.

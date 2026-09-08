@@ -160,7 +160,7 @@ Stop local backing services with `make dev-stop`. Adding `-v` to a Compose `down
 
 ## In-game scripting
 
-The source now includes Starlark authoring and testing from ANSI/PETSCII terminals, admin-reviewed publication, room/NPC/item hooks, persistent script state, and bounded reward/healing APIs. Use `script` in the rebuilt gateway; see [the scripting guide](docs/SCRIPTING.md) for permission setup, examples and limits. This requires deployment of the updated gateway and migration.
+In-game Starlark scripting is deployed: authoring and testing from ANSI/PETSCII terminals, admin-reviewed publication, room/NPC/item hooks, persistent script state, and bounded reward/healing APIs. Use `script` in the gateway; see [the scripting guide](docs/SCRIPTING.md) for contributor permission setup, examples and limits.
 
 ## Validation and remaining work
 

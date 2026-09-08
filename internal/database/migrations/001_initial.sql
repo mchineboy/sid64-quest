@@ -1,4 +1,4 @@
--- SID64 Quest Database Schema
+-- Race Condition Kingdom Database Schema
 -- PostgreSQL Schema for critical game data
 
 -- Enable UUID extension
@@ -181,3 +181,4 @@ CREATE INDEX IF NOT EXISTS idx_auctions_status ON auctions(status);
 CREATE INDEX IF NOT EXISTS idx_auctions_ends_at ON auctions(ends_at);
 CREATE INDEX IF NOT EXISTS idx_scripts_type ON scripts(script_type);
 CREATE INDEX IF NOT EXISTS idx_scripts_active ON scripts(is_active);
+

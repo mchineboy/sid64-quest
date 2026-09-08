@@ -37,10 +37,10 @@ Use event.player.name, event.room.name, event.target.name,
 event.command and event.text. State values are strings.`
 
 func (s *Server) scriptCommand(c *Connection, args []string) error {
-	if c.User == nil {
+	if c.Character == nil || c.Character.UserID == uuid.Nil {
 		return c.SendError("builder account required")
 	}
-	if _, err := s.world.ScriptCommand(c.Context, c.User.ID, game.ScriptRequest{Action: "help"}); err != nil {
+	if _, err := s.world.ScriptCommand(c.Context, c.Character.UserID, game.ScriptRequest{Action: "help"}); err != nil {
 		return c.SendError(err.Error())
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -109,7 +109,7 @@ func (s *Server) scriptCommand(c *Connection, args []string) error {
 			}
 		}
 	}
-	drafts, err := s.world.ScriptCommand(c.Context, c.User.ID, req)
+	drafts, err := s.world.ScriptCommand(c.Context, c.Character.UserID, req)
 	if err != nil {
 		return c.SendError(err.Error())
 	}
@@ -181,7 +181,7 @@ func numberedSource(lines []string) string {
 func (s *Server) editScript(c *Connection, input string) error {
 	e := c.ScriptEditor
 	// Recheck permission even while an editor is open.
-	if _, err := s.world.ScriptCommand(c.Context, c.User.ID, game.ScriptRequest{Action: "show", ID: e.Draft.ID}); err != nil {
+	if _, err := s.world.ScriptCommand(c.Context, c.Character.UserID, game.ScriptRequest{Action: "show", ID: e.Draft.ID}); err != nil {
 		c.ScriptEditor = nil
 		return c.SendError(err.Error())
 	}
@@ -193,7 +193,7 @@ func (s *Server) editScript(c *Connection, input string) error {
 	case ".list":
 		return c.SendMessage(numberedSource(e.Lines))
 	case ".save":
-		_, err := s.world.ScriptCommand(c.Context, c.User.ID, game.ScriptRequest{Action: "save", ID: e.Draft.ID, Revision: e.Draft.Revision, Content: strings.Join(e.Lines, "\n") + "\n"})
+		_, err := s.world.ScriptCommand(c.Context, c.Character.UserID, game.ScriptRequest{Action: "save", ID: e.Draft.ID, Revision: e.Draft.Revision, Content: strings.Join(e.Lines, "\n") + "\n"})
 		if err != nil {
 			return c.SendError(err.Error())
 		}

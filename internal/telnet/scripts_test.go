@@ -60,7 +60,8 @@ func TestInGameScriptingWorkflow(t *testing.T) {
 	}()
 	c, collect := drainedConnection(t)
 	c.State = StateInGame
-	c.User = &models.User{ID: owner}
+	// Real authenticated connections identify their owner through Character.
+	c.User = nil
 	c.Character = &models.Character{ID: character, UserID: owner, Name: "Editor"}
 	c.Room = &models.Room{ID: room, Name: "Editor room"}
 	s := &Server{world: game.NewWorldService(db), hub: newPlayerHub()}
