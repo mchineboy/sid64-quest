@@ -72,7 +72,6 @@ def connect(player, port):
     token=urllib.parse.parse_qs(urllib.parse.urlparse(endpoint).query)['token'][0]
     _,body=request(browser,'/auth',dict(token=token,username=username,password=password))
     assert 'AUTHENTICATION SUCCESSFUL' in body
-    s.sendall(pet_encode('check\r') if port == 6464 else b'check\r\n')
     until(s,lambda b: b'character' in b.lower())
     s.sendall(b'1\r\n')
     return s

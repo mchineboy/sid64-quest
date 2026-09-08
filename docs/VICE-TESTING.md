@@ -45,7 +45,7 @@ port (25232) and unused incoming-call port (26400) bind only to loopback.
 4. In terminal mode, enter `AT`. Expect `OK`.
 5. Dial `ATDT555` (or `ATDT127.0.0.1:6464`). Expect `CONNECT`, then the MUD.
 6. Enter a username. Open the displayed pairing URL in the Mac browser,
-   sign in or register, then type `check` in CCGMS and select a character.
+   sign in or register, then wait for CCGMS to advance and select a character.
 
 ## Playtest checklist
 

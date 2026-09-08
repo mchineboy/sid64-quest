@@ -1,112 +1,173 @@
 # SID64 Quest
 
-SID64 Quest is a small Go MUD for Commodore and modern terminals, with a browser-based login step. Visit [sid64.quest](https://sid64.quest) to create an account, then connect on port 6464 for PETSCII or 2323 for ANSI. It is an early playable foundation, not a finished online world: you can enter a small shared map, move between rooms, and talk with other players.
+A Go MUD for Commodore and modern terminals, with a shared fantasy world, persistent characters, and browser-based account management. The public alpha is live at **[sid64.quest](https://sid64.quest/signup)**. Testers do not need Tailscale.
 
-The project began as an experiment in mixing the old telnet MUD experience with a normal web login. The current server should not be treated as a production service yet.
+## Play the public alpha
 
-## What works today
+| Connection | Address |
+|---|---|
+| Sign up | [sid64.quest/signup](https://sid64.quest/signup) |
+| Manage your account | [sid64.quest/account](https://sid64.quest/account) |
+| ANSI terminal | `sid64.quest:2323` |
+| Commodore / PETSCII terminal | `sid64.quest:6464` |
 
-- PostgreSQL and Redis power the alpha. MongoDB is optional.
-- The telnet gateway presents a short-lived browser pairing code. ANSI clients also get a scannable QR code; a 40x25 PETSCII screen cannot hold one, so it shows the code in large reverse video instead.
-- The auth service validates the link and attaches the browser login to the telnet session.
-- New players can create an account and their first character from that same browser handoff.
-- A persistent five-room starter area supports `look`, cardinal movement, `say`, and a real `who` list.
-- Items persist on the ground and in inventory. You can `take`, `drop`, `use` potions, and `equip` a weapon or armor.
-- The Town Crier will pay you for returning the misplaced harbor ledger from the Moonlit Docks; that job repeats.
-- Resting at the inn restores health and stamina. Movement spends stamina. Those values are saved immediately.
-- PETSCII-aware telnet clients get a native Commodore presentation; raw Commodore callers can use the dedicated PETSCII port.
-- New installations start without default accounts or passwords.
-- In-game commands: `look`, cardinal movement (`n`/`s`/`e`/`w`), `where`, `take`/`drop`/`use`/`equip`, `talk`, `give`, `rest`, `say`, `who`, `stats`, `inventory`, `help`, `terminal ansi|petscii`, and `quit`.
+1. Create an account and your first character on the website.
+2. Connect your terminal, enter your username, and follow the browser-pairing instructions.
+3. On a Commodore, type `QR` at the pairing screen to display a scannable login link. `HELP` restores the text instructions. ANSI clients also receive a QR code.
+4. Sign in through the browser. The terminal detects completion automatically; choose a character to enter the world.
 
-## What is still a stub
+Pairing codes expire after five minutes; `renew` generates a fresh one. Passwords are entered in the HTTPS browser flow. Terminal gameplay and chat use plaintext TCP between the client and public gateway.
 
-Combat, private messages, shops, banks, auctions, builders, moderation, and production monitoring are either placeholders or schema/design work. The database has seed data for some of those ideas, but the gateway does not implement them.
+For modern terminals:
 
-That distinction matters: this repository is ready for local development and for turning into a real game, but it is not ready to be exposed as a public MUD.
-
-## Run it locally
-
-You need Go 1.23 (the version in `go.mod`) and Docker Desktop or another Docker-compatible runtime with Compose v2.
-
-```bash
-git clone https://github.com/tylerhardison/race-condition-kingdom.git
-cd race-condition-kingdom
-
-./scripts/dev-setup.sh
-docker compose -f docker-compose.simple.yml up -d
-go test ./...
-make build
+```sh
+telnet sid64.quest 2323
 ```
 
-Start the two applications in separate terminals:
+For CCGMS or another native PETSCII client, dial `sid64.quest:6464` using your modem's connection command. No Mac relay is required for public access.
 
-```bash
-make run-auth-service
-```
+See the [tester guide](docs/ALPHA-TESTERS.md) for things to try and useful bug-report details.
 
-```bash
-make run-telnet-gateway
-```
+## Implemented gameplay
 
-Then connect from a third terminal:
+- **Five persistent rooms:** Town Square, North Gate, Market Lane, The Prancing Pony Inn, and Moonlit Docks.
+- **A shared world across both terminal ports:** ANSI and PETSCII players see one another, share room chat, and appear in the same online-player list.
+- **Persistent progress:** location, inventory, equipment, health, stamina, gold, and delivery progress are stored in PostgreSQL.
+- **Items and equipment:** take and drop items, drink potions, equip and unequip weapons or armor, and inspect your inventory.
+- **Bulk pickup:** `take all` and `get all` collect available stacks up to the 50-item pack limit. Duplicate quest items stay behind. Pickups are transactional and protected against concurrent players taking the same items.
+- **A repeatable objective:** return the misplaced harbor ledger from the docks to the Town Crier for a reward.
+- **Rest and recovery:** movement spends stamina; resting at the inn restores health and stamina.
+- **A little levity:** try taking the fountain, a lamppost, or other scenery. Actual portable items take precedence over scenery jokes.
 
-```bash
-telnet localhost 2323
-```
+| Commands | Purpose |
+|---|---|
+| `look`, `l`, `look <item>` | Inspect your surroundings or an item |
+| `north`, `south`, `east`, `west` / `n`, `s`, `e`, `w` | Move |
+| `where` | Show location and exits |
+| `take <item>`, `get <item>`, `take all` | Pick up items |
+| `drop <item>`, `use <item>` | Drop an item or use a potion |
+| `equip <item>`, `unequip <item>` | Manage equipment |
+| `talk [name]`, `give <item> [name]` | Interact with NPCs |
+| `rest` | Recover at the inn |
+| `say <message>`, `who` | Chat and see online players |
+| `stats`, `inventory`, `inv`, `i` | Check your character and pack |
+| `help`, `terminal ansi`, `terminal petscii` | Help and display preferences |
+| `quit`, `q` | Leave the game |
 
-Commodore 64/128 callers should connect their PETSCII terminal program to port `6464` instead. At any login prompt or in game, use `terminal ansi` or `terminal petscii` to override the display mode for your connection. On the normal telnet port, the server also uses terminal-type negotiation and switches automatically when a client identifies itself as PETSCII, C64, C128, CCGMS, CGTerm, NovaTerm, or UltimateTerm.
+A character can have only one active terminal connection. Idle sessions expire after 15 minutes; abrupt network loss may take time to clear.
 
-At the username prompt, enter a name. Scan the QR code on an ANSI terminal, or open `/pair` on the auth service and enter the displayed pairing code. Create an account and character, or sign in with your existing account. New installations have no seeded admin account. Type `check` in telnet after the browser confirms the login, then enter `1` to select a character.
+## Commodore presentation
 
-Stop the backing services with:
+The dedicated PETSCII listener supports native Commodore clients without requiring telnet negotiation. The ANSI listener also recognizes compatible terminal identifiers, and display mode can be selected explicitly.
 
-```bash
-make dev-stop
-```
+- Native colors and screen controls, with text wrapped to 39 columns to avoid accidental C64 auto-wrap.
+- **Mixed-case text:** screens send `CHR$(14)` to select the lowercase/uppercase character set. Names, descriptions, URLs, pairing codes, and chat retain their case; keyboard input is decoded accordingly.
+- Native character-selection, room, inventory, stats, help, and online-player screens.
+- **PETSCII QR login:** four QR modules are packed into each character using solid quadrant glyphs. This preserves square modules and the quiet zone within a 40×25 screen. Use a black terminal background. Oversized URLs fall back to text instructions.
 
-To discard local database data completely, use `docker compose -f docker-compose.simple.yml down -v`.
-
-For emulated C64 testing, see [VICE and CCGMS setup](docs/VICE-TESTING.md).
+The QR render was checked against the C64 character ROM and independently decoded with macOS Vision. Scanning from a particular physical display still needs hardware validation. See [VICE, CCGMS, and hardware testing](docs/VICE-TESTING.md).
 
 ## Web accounts
 
-Open `/account` on the auth service (port 8080) to sign in without a terminal.
-`/signup` creates an account and first character; `/login` signs in existing players.
-The account page shows saved characters, locations, health, stamina, and gold.
-Players can create up to five characters, rename their own characters, update
-email with their current password, and change their password. Renames appear in
-open terminal sessions after reconnecting. There are no web gameplay controls.
+The website handles account administration; gameplay stays in the terminal.
 
-Browser sessions expire after 12 hours; sign-out revokes the current browser
-session and a password change invalidates all browser sessions. Existing terminal
-connections are unaffected. Forms use CSRF tokens, authentication attempts are
-rate-limited, and session cookies are HttpOnly/SameSite with Secure enabled when
-`AUTH_BASE_URL` uses HTTPS. Set that URL to a host players can reach.
+- Standalone signup and login, plus terminal-pairing signup.
+- Up to five characters per account, character creation and renaming.
+- Saved character location, health, stamina, and gold displayed on the account page.
+- Email updates and password changes with current-password verification.
+- CSRF-protected forms, rate limits, and HttpOnly/SameSite session cookies; production cookies use Secure.
+- Twelve-hour browser sessions. Sign-out revokes the current session; changing the password invalidates existing browser sessions on subsequent requests.
 
-Email verification, emailed password recovery, character retirement/deletion,
-and account deletion are not implemented. For now, forgotten passwords need
-operator assistance. The existing terminal pairing signup flow remains available.
+Renamed characters appear in existing terminal sessions after reconnecting. Password changes do not disconnect active terminal sessions. Email verification, emailed password recovery, account deletion, and character deletion are not implemented. Operators can reset passwords and disable or enable accounts with `rck-admin`.
 
-## Useful commands
+## Running deployment
 
-```bash
-make test                 # run Go tests
-make build                # build the auth service and telnet gateway
-make dev-start            # start PostgreSQL, Redis, and MongoDB
-make dev-stop             # stop those services
-make dev-start-full       # start databases plus the optional admin/monitoring tools
+```text
+Browser / terminal
+        |
+        v
+EC2 public gateway — sid64.quest
+  Caddy: HTTPS + automatic certificates
+  HAProxy: ANSI 2323 / PETSCII 6464
+        |
+        | Tailscale
+        v
+Raspberry Pi — symptom-pi
+  Auth/account service + terminal gateway
+  PostgreSQL + Redis
 ```
 
-The service defaults live in [`pkg/config/config.go`](pkg/config/config.go). The `make run-*` commands export the local `.env` file before starting a service. If you run a binary directly, export that file yourself first (for example, `set -a; . ./.env; set +a`).
+The EC2 gateway is a normal Tailscale device, not an exit node. Tailscale is used between servers; players connect through the public gateway. PostgreSQL and Redis have no published host ports. MongoDB is optional and is not part of the Pi deployment.
 
-## A practical next milestone
+Operational work completed:
 
-The next useful step is private-alpha hardening: secrets handling, migrations, TLS, health checks, and a small invited playtest. Splitting it into more services, Kubernetes, Discord, scripts, or an auction system will make operating it harder before it makes the game more playable.
+- Embedded, transactional, checksum-checked database migrations and serialized starter-world initialization.
+- Fresh deployment secrets; no default accounts or seeded administrator password.
+- Atomic, single-use browser pairing; shared terminal presence and duplicate-character-session prevention.
+- HTTP readiness checks against PostgreSQL and Redis, container health checks, and service startup configuration.
+- Daily PostgreSQL backups on the Pi, scheduled checksum-verified copies to the operator's Mac, and successful disposable-database restore rehearsals.
+- An ARM64 deployment script that takes a backup and retains the previous application image.
+- Operator account listing, disable/enable, and password-reset commands.
 
-`ARCHITECTURE.md` records the original, much larger idea. It is useful as a backlog, not a description of the running system.
+The deployed world is separate from local development data. Deployment interrupts active terminal sessions.
 
-## Private alpha on the Pi
+Read the [operator runbook](docs/ALPHA-RUNBOOK.md), [Pi configuration](deploy/pi/compose.yml), and [EC2 gateway notes](deploy/ec2/README.md) before operating the deployment.
 
-See [the deployment and operator runbook](docs/ALPHA-RUNBOOK.md) and
-[the tester guide](docs/ALPHA-TESTERS.md). The Pi uses a separate, fresh world;
-local development players are not imported.
+## Development
+
+Requirements: **Go 1.23+** (see `go.mod`) and Docker with Compose v2.
+
+```sh
+git clone https://github.com/tylerhardison/race-condition-kingdom.git
+cd race-condition-kingdom
+cp .env.example .env
+```
+
+Edit `.env` before starting services. Supply your own PostgreSQL and MongoDB root passwords and a random `AUTH_SECRET`; `openssl rand -hex 32` can generate a secret. Keep `MONGODB_URI` empty unless using MongoDB. For local browser login, set `AUTH_BASE_URL=http://localhost:8080`; for testing from another device, use a hostname/address that device can reach.
+
+```sh
+docker compose -f docker-compose.simple.yml up -d --wait
+make build
+```
+
+Start the applications in separate terminals:
+
+```sh
+make run-auth-service
+```
+
+```sh
+make run-telnet-gateway
+```
+
+The `make run-*` targets load `.env`. Open [localhost:8080/signup](http://localhost:8080/signup), then connect to `localhost:2323` or `localhost:6464`.
+
+For a binary or test command launched directly, export the environment first:
+
+```sh
+set -a
+. ./.env
+set +a
+go test -race -count=1 ./...
+go vet ./...
+```
+
+Database-backed tests require a reachable development PostgreSQL instance; they can skip when it is unavailable. Use a disposable development database, never production, for tests.
+
+Stop local backing services with `make dev-stop`. Adding `-v` to a Compose `down` command deletes its database volumes. The optional full development stack includes additional dashboards and requires explicit dashboard passwords; it is not needed for the alpha.
+
+`.env` is ignored. Historical development credentials remain in Git history and must not be reused. The repository/module path retains the original `race-condition-kingdom` name; the game is now SID64 Quest.
+
+## In-game scripting
+
+The source now includes Starlark authoring and testing from ANSI/PETSCII terminals, admin-reviewed publication, room/NPC/item hooks, persistent script state, and bounded reward/healing APIs. Use `script` in the rebuilt gateway; see [the scripting guide](docs/SCRIPTING.md) for permission setup, examples and limits. This requires deployment of the updated gateway and migration.
+
+## Validation and remaining work
+
+The race-enabled Go suite covers account flows, authentication, migrations, gameplay persistence, PETSCII rendering/input, concurrent pickups, and session ownership. The public smoke test exercised HTTPS signup and pairing, ANSI/PETSCII chat, duplicate-login prevention, disconnect/reconnect, and saved location through the EC2 gateway.
+
+This is a **small public alpha**, not a finished persistent-world game. Combat, private messages, a working shop/economy, banks, auctions, room/item creation tools, and comprehensive moderation/monitoring remain future work. Some schemas and architecture documents describe features that are not implemented.
+
+The most immediate operational issue is Pi storage: a slow boot logged SD-card busy stalls. Services eventually recovered automatically, but the planned NVMe migration remains important. A successful service restart and backup restore are not proof of recovery from every power-loss scenario. Broader real-hardware testing and invited-player feedback are still needed.
+
+See [ROADMAP.md](ROADMAP.md) for direction. [ARCHITECTURE.md](ARCHITECTURE.md) records the original larger design, rather than the exact deployed system.

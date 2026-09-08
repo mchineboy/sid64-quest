@@ -64,6 +64,7 @@ type Connection struct {
 	mutex        sync.RWMutex
 	writeMutex   sync.Mutex
 	afterCR      bool
+	ScriptEditor *scriptEditor
 }
 
 // Server represents the telnet server
@@ -253,13 +254,46 @@ func (s *Server) handleConnection(netConn net.Conn) {
 
 // connectionLoop handles the main connection loop
 func (s *Server) connectionLoop(conn *Connection) {
+	type readResult struct {
+		input string
+		err   error
+	}
+	reads := make(chan readResult)
+	go func() {
+		for {
+			input, err := conn.ReadLine()
+			select {
+			case reads <- readResult{input: input, err: err}:
+			case <-conn.Context.Done():
+				return
+			}
+			if err != nil && !errors.Is(err, errLineTooLong) {
+				return
+			}
+		}
+	}()
+
+	// Browser authentication happens out of band. Polling here lets the
+	// terminal advance as soon as the browser links its pending session while
+	// keeping reads, polling, and state transitions serialized in this loop.
+	authTicker := time.NewTicker(time.Second)
+	defer authTicker.Stop()
+
 	for {
 		select {
 		case <-conn.Context.Done():
 			return
-		default:
-			// Read input from client
-			input, err := conn.ReadLine()
+		case <-authTicker.C:
+			if conn.State == StateAwaitingAuth {
+				if err := s.checkAuthentication(conn, false); err != nil {
+					s.logger.WithError(err).Error("Error polling authentication")
+					if conn.SendError("An error occurred checking authentication.") != nil {
+						return
+					}
+				}
+			}
+		case result := <-reads:
+			input, err := result.input, result.err
 			if err != nil {
 				if errors.Is(err, errLineTooLong) {
 					if conn.SendError("Command too long (maximum 1024 bytes). Please try again.") != nil {
@@ -289,7 +323,6 @@ func (s *Server) connectionLoop(conn *Connection) {
 
 // processInput processes input based on the connection state
 func (s *Server) processInput(conn *Connection, input string) error {
-	input = strings.TrimSpace(input)
 	defer s.hub.update(conn)
 	if conn.State == StateInGame && conn.Session != nil {
 		active, err := s.authService.UserActive(conn.Context, conn.Session.UserID)
@@ -299,6 +332,10 @@ func (s *Server) processInput(conn *Connection, input string) error {
 		}
 	}
 
+	if conn.State == StateInGame && conn.ScriptEditor != nil {
+		return s.editScript(conn, input)
+	}
+	input = strings.TrimSpace(input)
 	parts := strings.Fields(input)
 	if len(parts) > 0 && strings.EqualFold(parts[0], "terminal") {
 		return s.handleTerminalCommand(conn, parts[1:])
@@ -397,28 +434,31 @@ func (s *Server) handleAuthWaiting(conn *Connection, input string) error {
 	case "renew":
 		return s.handleUsernameInput(conn, conn.Username)
 	case "check", "c":
-		// Check if authentication is complete
-		return s.checkAuthentication(conn)
+		return s.checkAuthentication(conn, true)
 	default:
-		conn.SendMessage("Waiting for authentication... Type 'help' for instructions, 'check' to verify, or 'quit' to exit.")
+		conn.SendMessage("Waiting for authentication... Type 'help' for instructions or 'quit' to exit.")
 	}
 
 	return nil
 }
 
 // checkAuthentication checks if the user has completed authentication
-func (s *Server) checkAuthentication(conn *Connection) error {
+func (s *Server) checkAuthentication(conn *Connection, notifyPending bool) error {
 	// The browser marks a token as used when it links the pending session. The
 	// session, rather than the now-used token, is the source of truth here.
 	session, err := s.authService.GetSession(conn.ID)
 	if err != nil {
-		conn.SendMessage("Authentication not yet complete. Please visit the authentication URL.")
+		if notifyPending {
+			conn.SendMessage("Authentication not yet complete. Please visit the authentication URL.")
+		}
 		return nil
 	}
 
 	// Check if session has been authenticated
 	if session.UserID == uuid.Nil || session.AuthToken != conn.AuthToken {
-		conn.SendMessage("Authentication not yet complete. Please visit the authentication URL.")
+		if notifyPending {
+			conn.SendMessage("Authentication not yet complete. Please visit the authentication URL.")
+		}
 		return nil
 	}
 
@@ -452,7 +492,7 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 		conn.SendMessage("Goodbye!")
 		return errQuit
 	case "check", "c":
-		return s.checkAuthentication(conn)
+		return s.checkAuthentication(conn, true)
 	}
 	characters, err := s.authService.GetUserCharacters(conn.Session.UserID)
 	if err != nil {
@@ -504,6 +544,9 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 	if err := s.sendLook(conn); err != nil {
 		return err
 	}
+	if _, err := s.runScriptHook(conn, "room", conn.Room.ID, "on_enter", "login", ""); err != nil {
+		return err
+	}
 	return conn.SendPrompt(conn.formatPrompt())
 }
 
@@ -532,6 +575,8 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 
 	// Handle basic commands
 	switch command {
+	case "script":
+		return s.scriptCommand(conn, args)
 	case "quit", "q", "exit":
 		conn.SendMessage("Goodbye!")
 		return errQuit
@@ -543,6 +588,8 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		if len(args) > 0 {
 			message := strings.Join(args, " ")
 			s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s says: %s", conn.Character.Name, message))
+			_, err := s.runScriptHook(conn, "room", conn.Room.ID, "on_say", command, message)
+			return err
 		} else {
 			conn.SendError("Say what?")
 		}
@@ -550,7 +597,11 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		return conn.SendMessage(fmt.Sprintf("You are in %s. Exits: %s.", conn.Room.Name, strings.Join(game.SortedExitNames(conn.Room.Exits), ", ")))
 	case "look", "l":
 		if len(args) == 0 {
-			return s.sendLook(conn)
+			if err := s.sendLook(conn); err != nil {
+				return err
+			}
+			_, err := s.runScriptHook(conn, "room", conn.Room.ID, "on_look", command, "")
+			return err
 		}
 		return s.examineItem(conn, strings.Join(args, " "))
 	case "north", "n", "south", "s", "east", "e", "west", "w":
@@ -571,6 +622,11 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		if len(args) == 0 {
 			conn.SendError("Use what?")
 			return nil
+		}
+		if target, err := s.world.ScriptTarget(conn.Context, conn.Character.ID, conn.Room.ID, "item", strings.Join(args, " ")); err == nil {
+			if handled, err := s.runScriptHook(conn, "item", target, "on_use", command, strings.Join(args, " ")); err != nil || handled {
+				return err
+			}
 		}
 		return s.useItem(conn, strings.Join(args, " "))
 	case "equip", "wear", "wield":
@@ -596,6 +652,11 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		}
 		return conn.SendMessage(message)
 	case "talk":
+		if target, err := s.world.ScriptTarget(conn.Context, conn.Character.ID, conn.Room.ID, "npc", strings.Join(args, " ")); err == nil {
+			if handled, err := s.runScriptHook(conn, "npc", target, "on_talk", command, strings.Join(args, " ")); err != nil || handled {
+				return err
+			}
+		}
 		message, err := s.world.Talk(conn.Context, conn.Character.ID, conn.Room.ID, strings.Join(args, " "))
 		if err != nil {
 			conn.SendError(err.Error())
@@ -630,6 +691,9 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		conn.Character = character
 		return conn.SendStats()
 	default:
+		if handled, err := s.runScriptHook(conn, "room", conn.Room.ID, "on_command", command, strings.Join(args, " ")); err != nil || handled {
+			return err
+		}
 		conn.SendError(fmt.Sprintf("Unknown command: %s", command))
 	}
 
@@ -660,7 +724,8 @@ func (s *Server) moveCharacter(conn *Connection, direction string) error {
 	if err := s.eventBus.Publish(events.PlayerMoveEvent(conn.Character.ID, from.ID, to.ID, direction)); err != nil {
 		s.logger.WithError(err).Warn("Failed to publish player movement event")
 	}
-	return nil
+	_, err = s.runScriptHook(conn, "room", to.ID, "on_enter", direction, "")
+	return err
 }
 
 func (s *Server) sendLook(conn *Connection) error {

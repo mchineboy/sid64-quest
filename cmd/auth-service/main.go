@@ -592,7 +592,7 @@ func (h *AuthHandler) loadTemplates() error {
         <div class="title">🎉 AUTHENTICATION SUCCESSFUL! 🎉</div>
         <div class="success">Welcome back, {{.Username}}!</div>
         <div class="info">You are now logged in as character: <span class="character">{{.CharacterName}}</span></div>
-        <div class="info">You can now return to your telnet client and type 'check' to continue.</div>
+        <div class="info">Your telnet client will continue automatically.</div>
         <div class="info">This window can be safely closed.</div>
  <p><a href="/account">Manage your account and characters</a></p>
     </div>

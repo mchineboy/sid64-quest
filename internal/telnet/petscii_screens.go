@@ -110,6 +110,7 @@ WHO            Online players
 STATS          Character details
 INV / I        Inventory
 TERMINAL ANSI / PETSCII
+SCRIPT         Builder scripting
 QUIT / Q       Leave the game`)
 }
 

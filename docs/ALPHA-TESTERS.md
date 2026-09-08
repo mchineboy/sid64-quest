@@ -4,7 +4,7 @@ Public testing is available at https://sid64.quest/signup. No Tailscale installa
 
 1. Create an account at https://sid64.quest/signup and create a character. The account page manages email, password and up to five characters, including names. Gameplay happens in the terminal.
 2. Connect to `sid64.quest` port **2323** for ANSI, or **6464** for PETSCII. Use the full domain name, sid64.quest.
-3. Enter your username. Open the displayed pairing URL in your browser and sign in. Return to the terminal and type `check`, then choose your character. Type `renew` if the pairing code expires.
+3. Enter your username. Open the displayed pairing URL in your browser and sign in. The terminal advances automatically; choose your character when prompted. Type `renew` if the pairing code expires.
 4. Try `help`, `look`, `who`, `say hello`, and `east`. Explore, collect and use items, and talk to NPCs. Type `quit` when finished.
 
 A real Commodore modem can dial `sid64.quest:6464` directly over the internet. During pairing, type `QR` to scan the login URL with a phone, or `HELP` for text instructions. The Mac relay remains optional. See [VICE testing](VICE-TESTING.md) for client setup.

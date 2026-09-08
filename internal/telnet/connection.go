@@ -43,7 +43,8 @@ func (c *Connection) ReadLine() (string, error) {
 		if tooLong {
 			return "", errLineTooLong
 		}
-		return strings.TrimSpace(string(line)), nil
+		// Preserve source indentation; processInput trims ordinary commands.
+		return string(line), nil
 	}
 	for {
 		character, err := c.readApplicationByte()
@@ -220,8 +221,8 @@ Pairing code: %s
 
 %s
 
-Once you've authenticated, type 'check' to continue, or 'help' for more options.
-Waiting for authentication...
+Once you've authenticated, this terminal will continue automatically.
+Waiting for authentication... Type 'help' for more options.
 `,
 		c.Formatter.Colorize("🔐 AUTHENTICATION REQUIRED", ansi.UIWarning),
 		scan,
@@ -324,6 +325,7 @@ AVAILABLE COMMANDS
   terminal ansi|petscii Change terminal display
   stats, st            Show your character stats
   inventory, inv, i    Show your inventory
+  script               Builder scripting help
   help, h              Show this help
   quit, q              Leave the game
 

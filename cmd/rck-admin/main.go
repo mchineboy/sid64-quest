@@ -15,7 +15,7 @@ import (
 
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: rck-admin list | disable USER | enable USER | reset-password USER (new password on stdin)")
+		return fmt.Errorf("usage: rck-admin list | disable USER | enable USER | reset-password USER (new password on stdin) | grant-builder USER | revoke-builder USER | grant-admin USER | revoke-admin USER")
 	}
 	cfg := config.LoadFromEnv()
 	db, err := sql.Open("postgres", cfg.Database.PostgreSQL.ConnectionString())
@@ -47,6 +47,9 @@ func run() error {
 	name := strings.ToLower(strings.TrimSpace(os.Args[2]))
 	var result sql.Result
 	switch os.Args[1] {
+	case "grant-builder", "revoke-builder", "grant-admin", "revoke-admin":
+		parts := strings.SplitN(os.Args[1], "-", 2)
+		result, err = db.ExecContext(ctx, `UPDATE users SET permissions=jsonb_set(COALESCE(permissions,'{}'::jsonb),ARRAY[$1]::text[],to_jsonb($2::boolean)) WHERE username=$3`, parts[1], parts[0] == "grant", name)
 	case "disable", "enable":
 		result, err = db.ExecContext(ctx, `UPDATE users SET is_active=$1 WHERE username=$2`, os.Args[1] == "enable", name)
 	case "reset-password":

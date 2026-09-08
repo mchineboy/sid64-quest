@@ -55,7 +55,8 @@ Migrations, fresh Pi secrets, TLS, rate limits, shared terminal presence, duplic
 
 - Combat and NPC behavior.
 - Economy, shops, banks, and auctions.
-- Builder tooling, moderation, and scripting.
+- In-game Starlark scripting implemented: draft editor, isolated testing, admin publication, room/NPC/item hooks, state and bounded rewards. See [the scripting guide](docs/SCRIPTING.md).
+- Further builder tooling (room/item creation, world editing) and moderation.
 - Optional service separation and monitoring once a measured need exists.
 
 The original architecture document remains a source of ideas, not an implementation order.
