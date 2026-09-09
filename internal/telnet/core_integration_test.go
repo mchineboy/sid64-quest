@@ -184,6 +184,52 @@ func TestCoreIntegrationRecoveryAndExactlyOnce(t *testing.T) {
 	require.True(t, f.request(green, req, "input", "look").Closed)
 }
 
+func TestCoreIntegrationIdleEvents(t *testing.T) {
+	f := newCoreFixture(t)
+	u, ch := f.player("Observer")
+	a := f.login(f.core, "observer", u, ch)
+	u2, ch2 := f.player("Visitor")
+	b := f.login(f.core, "visitor", u2, ch2)
+	green := NewCore(f.db, f.cache, f.cfg, f.core.logger, f.core.Token)
+	require.Contains(t, outputText(f.request(green, a, "poll", "")), "Visitor has entered the realm")
+	f.request(f.core, b, "input", "east")
+	f.request(f.core, b, "input", "announce Across all rooms")
+	require.Contains(t, outputText(f.request(green, a, "poll", "")), "[Realm] Across all rooms")
+	_, err := f.db.Exec(`UPDATE users SET permissions='{"player":true}' WHERE id=$1`, u2)
+	require.NoError(t, err)
+	require.Contains(t, outputText(f.request(green, b, "input", "announce forbidden broadcast")), "admin permission required")
+	require.NotContains(t, outputText(f.request(f.core, a, "poll", "")), "forbidden broadcast")
+
+	// A real spawn while no player sends commands is observed after core
+	// replacement. A repeated request must not append events or prompts again.
+	_, err = f.db.Exec(`INSERT INTO npcs(name,description,room_id) SELECT 'Idle Goblin','Test mob',current_room_id FROM characters WHERE id=$1`, ch)
+	require.NoError(t, err)
+	a.Sequence++
+	a.Kind = "poll"
+	a.Input = ""
+	first, err := green.dispatch(context.Background(), *a)
+	require.NoError(t, err)
+	require.Contains(t, outputText(first), "Idle Goblin appears here")
+	again, err := f.core.dispatch(context.Background(), *a)
+	require.NoError(t, err)
+	require.Equal(t, first.Output, again.Output)
+	for _, out := range first.Output {
+		a.Ack = out.ID
+	}
+	require.NotContains(t, outputText(f.request(green, a, "poll", "")), "Idle Goblin")
+	require.NotContains(t, outputText(f.request(green, b, "poll", "")), "Idle Goblin", "another room must not see the spawn")
+	_, err = f.db.Exec(`DELETE FROM npcs WHERE name='Idle Goblin'`)
+	require.NoError(t, err)
+	require.Contains(t, outputText(f.request(f.core, a, "poll", "")), "Idle Goblin is no longer here")
+
+	// Socket-close notifications also announce departure, not only typed quit.
+	f.request(f.core, b, "close", "")
+	require.Contains(t, outputText(f.request(green, a, "poll", "")), "Visitor has left the realm")
+	_, err = green.dispatch(context.Background(), *b)
+	require.NoError(t, err)
+	require.NotContains(t, outputText(f.request(f.core, a, "poll", "")), "Visitor has left")
+}
+
 func TestCoreIntegrationRollbackAndOwnership(t *testing.T) {
 	f := newCoreFixture(t)
 	u, ch := f.player("Owner")

@@ -320,6 +320,7 @@ AVAILABLE COMMANDS
   give <item> [name]   Hand an item to someone
   rest                 Recover health and stamina at an inn
   say <message>        Speak to everyone in the room
+  announce <message>   Send a server-wide message (admin)
   where                Show your location and exits
   who                  Show online players
   terminal ansi|petscii Change terminal display

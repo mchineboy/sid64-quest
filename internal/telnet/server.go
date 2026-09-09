@@ -585,6 +585,7 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 	if _, err := s.runScriptHook(conn, "room", conn.Room.ID, "on_enter", "login", ""); err != nil {
 		return err
 	}
+	s.BroadcastMessage(conn.Character.Name + " has entered the realm.")
 	return conn.SendPrompt(conn.formatPrompt())
 }
 
@@ -613,6 +614,15 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 
 	// Handle basic commands
 	switch command {
+	case "announce":
+		if err := s.world.AuthorizeAnnouncement(conn.Context, conn.Character.UserID); err != nil {
+			return conn.SendError(err.Error())
+		}
+		if len(args) == 0 {
+			return conn.SendError("Usage: announce <server message>")
+		}
+		s.BroadcastMessage("[Realm] " + strings.Join(args, " "))
+		return nil
 	case "script":
 		return s.scriptCommand(conn, args)
 	case "quit", "q", "exit":

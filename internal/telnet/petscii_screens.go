@@ -107,6 +107,7 @@ GIVE <item> [name]
 REST           Recover at the inn
 SAY <message>  Talk to the room
 WHO            Online players
+ANNOUNCE <msg> Server message (admin)
 STATS          Character details
 INV / I        Inventory
 TERMINAL ANSI / PETSCII

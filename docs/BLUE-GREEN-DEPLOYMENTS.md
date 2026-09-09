@@ -156,3 +156,36 @@ Migrations and checkpoint formats must support both releases throughout the
 rollback window. Restarting the whole Compose project or `rck.service` still
 restarts the edge and drops sockets. Do not run legacy gateways alongside the
 new core against the same world: they bypass its ownership protocol.
+
+## Idle terminal events
+
+The edge reads input in a separate goroutine and polls the core once per second
+while waiting for a completed line. Room chat, movement, login/logout notices,
+and admin `announce <message>` broadcasts do not require the recipient to press
+Enter. Announcements require current, active admin permissions and reach all
+in-game players, including those editing scripts. Output is checkpointed in
+PostgreSQL with the originating command; Redis Pub/Sub is not a delivery dependency.
+
+The core also checkpoints each player's observed room items and living NPCs in
+the existing JSON checkpoint. It reports net additions/removals and quantity
+changes during idle polls, then restores the game/editor prompt. Initial login
+or entering a different room establishes a baseline rather than calling every
+existing entity a new spawn. This observes actual persisted world changes; it
+does not introduce a random-spawn scheduler, combat AI, or cosmetic heartbeat
+messages. Entities that appear and disappear entirely between observations are
+not reported. No PostgreSQL schema migration or Redis key change is required.
+
+The room snapshot is an optional checkpoint field. An older core can read it;
+if an old core rewrites a checkpoint during rollback, a new core re-establishes
+the snapshot baseline without inventing spawn events. Ordinary socket-close
+notifications and `quit` announce departures; an unreachable edge still uses
+the existing two-minute presence lease rather than an immediate logout event.
+
+Migration notices come from the edge when the core becomes unreachable or its
+identity changes, independently of input. A graceful **HAProxy-only reload**
+does not change the core, so it does not display a core-migration notice.
+
+`make test-core-restart` tests real ANSI/PETSCII sockets with no Enter from the
+observer, room additions, player movement, announcements, logout, partially
+typed input, and core failure/switch notices. It also verifies cross-core event
+delivery, repeated-request deduplication, room isolation, and permission revocation.

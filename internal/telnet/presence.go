@@ -68,7 +68,7 @@ func (h *playerHub) snapshots() []playerSnapshot {
 	return out
 }
 func (p playerSnapshot) send(message string) error {
-	data := message + "\r\n"
+	data := "\r\n" + message + "\r\n"
 	if p.petscii {
 		data = petsciiText(data)
 	}

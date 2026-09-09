@@ -164,6 +164,29 @@ func TestCoreIntegrationProcessRestart(t *testing.T) {
 		client.send("1\r")
 		client.until("Town Square")
 	}
+	// Nothing from the observer until the final CR: its input reader must not
+	// gate room events, server announcements, or another player's movement.
+	a.until("Edge Bob has entered the realm")
+	b.send("say half typed ")
+	a.send("announce live server notice\r")
+	b.until("[Realm] live server notice")
+	a.send("east\r")
+	b.until("Edge Alice leaves east")
+	a.send("west\r")
+	b.until("Edge Alice arrives")
+	var squareID string
+	require.NoError(t, f.db.QueryRow(`SELECT id FROM rooms WHERE name='Town Square' LIMIT 1`).Scan(&squareID))
+	// Real persisted room changes, not cosmetic heartbeat text.
+	_, err := f.db.Exec(`INSERT INTO room_items(room_id,item_id,quantity) SELECT $1,id,1 FROM items WHERE name='Health Potion' ON CONFLICT(room_id,item_id) DO UPDATE SET quantity=room_items.quantity+1`, squareID)
+	require.NoError(t, err)
+	b.until("Health Potion appears here")
+	a.until("Health Potion appears here")
+	_, err = f.db.Exec(`INSERT INTO npcs(name,description,room_id,health,max_health,level) VALUES('Socket Goblin','A test visitor',$1,10,10,1)`, squareID)
+	require.NoError(t, err)
+	b.until("Socket Goblin appears here")
+	a.until("Socket Goblin appears here")
+	b.send("survived\r")
+	a.until("Edge Bob says: half typed survived")
 	a.send("script new room socket_survivor\r")
 	var scriptID string
 	require.Eventually(t, func() bool {
@@ -203,7 +226,7 @@ func TestCoreIntegrationProcessRestart(t *testing.T) {
 	waitTestCore(t, blueTarget, f.core.Token)
 	badSwitch := exec.Command(filepath.Join(binDir, "core-switch"), "-target", blueTarget, "-file", targetFile)
 	badSwitch.Env = append(os.Environ(), "CORE_TOKEN="+strings.Repeat("wrong", 10))
-	_, err := badSwitch.CombinedOutput()
+	_, err = badSwitch.CombinedOutput()
 	require.Error(t, err)
 	previous, err := os.ReadFile(targetFile)
 	require.NoError(t, err)
@@ -226,6 +249,7 @@ func TestCoreIntegrationProcessRestart(t *testing.T) {
 	require.Nil(t, edge.ProcessState)
 	require.Nil(t, blue2.ProcessState)
 	a.send("quit\r")
+	b.until("Edge Alice has left the realm")
 	b.send("quit\r")
 	require.Eventually(t, func() bool {
 		_ = f.db.QueryRow(`SELECT count(*) FROM terminal_sessions WHERE NOT closed`).Scan(&count)

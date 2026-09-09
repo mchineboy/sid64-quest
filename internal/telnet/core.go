@@ -55,6 +55,7 @@ type checkpoint struct {
 	Output                           []terminalwire.Output
 	NextOutput                       uint64
 	Closed                           bool
+	Scene                            *roomScene
 }
 
 type coreSession struct {
@@ -183,6 +184,7 @@ func (c *Core) dispatch(ctx context.Context, req terminalwire.Request) (terminal
 	if s.edge != req.EdgeID {
 		return response, fmt.Errorf("connection belongs to another edge")
 	}
+	wasClosed := s.saved.Closed
 	// A socket-close notification is idempotent even if the last request's
 	// commit was not observed by the edge. It cannot execute a game command.
 	if req.Kind == "close" {
@@ -226,7 +228,16 @@ func (c *Core) dispatch(ctx context.Context, req terminalwire.Request) (terminal
 		}
 	}
 	server.forcePETSCII = s.saved.Dedicated
-	if req.Sequence == s.sequence+1 && !s.saved.Closed {
+	wasPlaying := s.conn.State == StateInGame && s.conn.Character != nil
+	fresh := req.Sequence == s.sequence+1 && !s.saved.Closed
+	if fresh {
+		// Observe background changes before an input command replaces the room
+		// view, so an active typist does not miss changes between polls either.
+		if req.Kind == "input" && wasPlaying {
+			if err = s.observeRoom(world, true); err != nil {
+				return response, err
+			}
+		}
 		before := make(map[string][]byte, len(sessions))
 		for id, other := range sessions {
 			other.capture()
@@ -282,6 +293,22 @@ func (c *Core) dispatch(ctx context.Context, req terminalwire.Request) (terminal
 		}
 		s.sequence = req.Sequence
 	}
+	// Commit lifecycle notifications in the recipients' outboxes as well. The
+	// nil legacy event bus does not deliver these for a stateless core.
+	if !wasClosed && s.saved.Closed && wasPlaying {
+		server.hub.remove(s.id)
+		server.BroadcastMessage(s.conn.Character.Name + " has left the realm.")
+	}
+	if fresh && !s.saved.Closed && s.conn.State == StateInGame {
+		if err = s.observeRoom(world, req.Kind == "poll"); err != nil {
+			return response, err
+		}
+		if req.Kind == "poll" && len(s.saved.Output) > 0 {
+			if err = s.conn.SendPrompt(s.conn.currentPrompt()); err != nil {
+				return response, err
+			}
+		}
+	}
 	if s.saved.Closed && req.Sequence == s.sequence+1 {
 		s.sequence = req.Sequence
 	}
@@ -320,10 +347,7 @@ func (c *Core) dispatch(ctx context.Context, req terminalwire.Request) (terminal
 	prompt := "Username> "
 	switch s.conn.State {
 	case StateInGame:
-		prompt = s.conn.formatPrompt()
-		if s.conn.ScriptEditor != nil {
-			prompt = "Edit> "
-		}
+		prompt = s.conn.currentPrompt()
 	case StateAwaitingAuth:
 		prompt = "Check> "
 	case StateAuthenticated:
