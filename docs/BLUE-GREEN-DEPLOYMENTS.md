@@ -159,6 +159,10 @@ new core against the same world: they bypass its ownership protocol.
 
 ## Idle terminal events
 
+Deployed to active core-green as `rck:4dc06f4` on 2026-09-08. The persistent
+edge and rollback core-blue remain on `rck:6d0e7d0`; see the release record in
+[the operations runbook](ALPHA-RUNBOOK.md).
+
 The edge reads input in a separate goroutine and polls the core once per second
 while waiting for a completed line. Room chat, movement, login/logout notices,
 and admin `announce <message>` broadcasts do not require the recipient to press

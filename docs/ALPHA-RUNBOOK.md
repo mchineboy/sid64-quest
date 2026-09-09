@@ -8,10 +8,33 @@ See [connection-preserving core deployments](BLUE-GREEN-DEPLOYMENTS.md).
 Production migrated on 2026-09-08 at 16:45 Pacific from clean `main` revision
 `6d0e7d08543ef6d9c1f837a840d77ca48530b8bc`, image `rck:6d0e7d0`.
 The terminal check immediately before cutover found zero established connections.
-Both core slots, edge and auth use this pinned release; blue is the active target.
+At that initial cutover both core slots, edge and auth used this pinned release,
+with blue as the active target. See the newer release record below.
 Public HTTPS signup/pairing, ANSI/PETSCII play and a blue→green→blue switch passed
 with the same edge container and authenticated sockets. The two temporary smoke
 accounts were removed, leaving the three original characters.
+
+### Idle-event release — 2026-09-08, 17:09 Pacific
+
+Clean, pushed `main` revision `4dc06f473c8dec5cbb30755272d12280ad38fe58`
+is deployed as `rck:4dc06f4` in **core-green**, now the active target.
+Blue remains on `rck:6d0e7d0` for rollback. Edge, auth, PostgreSQL and Redis
+were not replaced or restarted; the edge has the same container ID/start time.
+No schema migration or Redis configuration change was required.
+
+Pre-release backup `backups/20260909T000527Z.dump` passed a disposable restore
+check (four migrations, five rooms, three characters). Release artifacts and
+the protected prior environment are in `/srv/rck/releases/4dc06f4/`.
+Real public ANSI/PETSCII sessions authenticated before switching blue to green
+and kept the same sockets. Migration notices arrived without Enter; idle
+movement, admin announcements, partial input and logout notices passed.
+The two disposable smoke accounts were removed after verification.
+Post-release backup `backups/20260909T001006Z.dump` also passed its restore
+check with the original three characters, five rooms and four migrations.
+
+The active core supports `announce <message>` for current admins. Room-content
+changes and player notices are delivered during idle polling. See the event
+delivery guarantees and limits in [the deployment guide](BLUE-GREEN-DEPLOYMENTS.md).
 
 Public web: https://sid64.quest/account
 Public ANSI: `sid64.quest:2323`; public PETSCII: `sid64.quest:6464`.
