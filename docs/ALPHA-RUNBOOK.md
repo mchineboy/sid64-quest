@@ -103,6 +103,7 @@ On the Pi in `/srv/rck`:
 
 ```sh
 docker compose exec -T auth /app/rck-admin list
+docker compose exec -T auth /app/rck-admin stats
 docker compose exec -T auth /app/rck-admin disable USERNAME
 docker compose exec -T auth /app/rck-admin enable USERNAME
 ```

@@ -5,17 +5,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	_ "github.com/lib/pq"
-	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
-	"golang.org/x/crypto/bcrypt"
 	"os"
 	"strings"
 	"time"
+
+	_ "github.com/lib/pq"
+	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
+	"golang.org/x/crypto/bcrypt"
 )
+
+const usage = "usage: rck-admin stats | list | disable USER | enable USER | reset-password USER (new password on stdin) | grant-builder USER | revoke-builder USER | grant-admin USER | revoke-admin USER"
 
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: rck-admin list | disable USER | enable USER | reset-password USER (new password on stdin) | grant-builder USER | revoke-builder USER | grant-admin USER | revoke-admin USER")
+		return fmt.Errorf("%s", usage)
 	}
 	cfg := config.LoadFromEnv()
 	db, err := sql.Open("postgres", cfg.Database.PostgreSQL.ConnectionString())
@@ -25,6 +28,28 @@ func run() error {
 	defer db.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	if os.Args[1] == "stats" {
+		if len(os.Args) != 2 {
+			return fmt.Errorf("%s", usage)
+		}
+		var total, loggedIn, last24Hours, last7Days int
+		err = db.QueryRowContext(ctx, `
+			SELECT
+				COUNT(*),
+				COUNT(*) FILTER (WHERE last_login IS NOT NULL),
+				COUNT(*) FILTER (WHERE last_login >= NOW() - INTERVAL '24 hours'),
+				COUNT(*) FILTER (WHERE last_login >= NOW() - INTERVAL '7 days')
+			FROM users
+		`).Scan(&total, &loggedIn, &last24Hours, &last7Days)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("registered_users=%d\n", total)
+		fmt.Printf("users_logged_in=%d\n", loggedIn)
+		fmt.Printf("users_logged_in_last_24h=%d\n", last24Hours)
+		fmt.Printf("users_logged_in_last_7d=%d\n", last7Days)
+		return nil
+	}
 	if os.Args[1] == "list" {
 		rows, e := db.QueryContext(ctx, `SELECT username,is_active FROM users ORDER BY username`)
 		if e != nil {

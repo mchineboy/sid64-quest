@@ -78,7 +78,7 @@ The website handles account administration; gameplay stays in the terminal.
 - CSRF-protected forms, rate limits, and HttpOnly/SameSite session cookies; production cookies use Secure.
 - Twelve-hour browser sessions. Sign-out revokes the current session; changing the password invalidates existing browser sessions on subsequent requests.
 
-Renamed characters appear in existing terminal sessions after reconnecting. Password changes do not disconnect active terminal sessions. Email verification, emailed password recovery, account deletion, and character deletion are not implemented. Operators can reset passwords and disable or enable accounts with `rck-admin`.
+Renamed characters appear in existing terminal sessions after reconnecting. Password changes do not disconnect active terminal sessions. Email verification, emailed password recovery, account deletion, and character deletion are not implemented. Operators can reset passwords, disable or enable accounts, and view distinct-login test counts with `rck-admin stats`.
 
 ## Running deployment
 
