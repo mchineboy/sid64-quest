@@ -99,6 +99,20 @@ docker compose exec -T postgres psql -X -U mud_user -d race_condition_kingdom -c
 
 ## Accounts
 
+### Password recovery release — 2026-09-12, 19:10 Pacific
+
+Auth is deployed as `rck:16291d4` from pushed `main` revision `16291d4`.
+Only auth was recreated; both core containers and the persistent edge retained
+their container IDs, with green still active. The previous auth image
+`rck:bb81666` remains available for rollback by restoring `AUTH_IMAGE` and
+recreating only auth with `--no-deps`.
+
+Pre-release backup `backups/20260913T020907Z.dump` passed the disposable restore
+check (four migrations, five rooms, four characters). Prior image pins are in
+`/srv/rck/releases/16291d4/`. Auth readiness and the public login page show
+“Reset it by email” linking to `/forgot`. Resend env vars were already present
+on the Pi before this rollout.
+
 ### Login statistics release — 2026-09-09, 08:51 Pacific
 
 Auth is deployed as `rck:bb81666` from pushed `main` revision `bb81666`.
