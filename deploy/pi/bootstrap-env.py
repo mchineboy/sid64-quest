@@ -14,6 +14,7 @@ settings = {
  'TELNET_PORT': '2323', 'PETSCII_PORT': '6464', 'MAX_CONNECTIONS': '32',
  'IDLE_TIMEOUT': '900', 'AUTH_BASE_URL': 'https://sid64.quest',
  'AUTH_SECRET_KEY': secrets.token_hex(32), 'BCRYPT_COST': '12',
+ 'RESEND_API_KEY': '', 'MAIL_FROM': 'SID64 Quest <noreply@mail.sid64.quest>',
  'MUD_BIND_IP': '100.67.213.90',
 }
 try:

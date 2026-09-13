@@ -13,6 +13,7 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Redis    RedisConfig    `yaml:"redis"`
 	Auth     AuthConfig     `yaml:"auth"`
+	Mail     MailConfig     `yaml:"mail"`
 	Discord  DiscordConfig  `yaml:"discord"`
 	Game     GameConfig     `yaml:"game"`
 }
@@ -69,6 +70,12 @@ type AuthConfig struct {
 	BaseURL       string        `yaml:"base_url"`
 	SecretKey     string        `yaml:"secret_key"`
 	BCryptCost    int           `yaml:"bcrypt_cost"`
+}
+
+// MailConfig holds outbound email settings (Resend).
+type MailConfig struct {
+	ResendAPIKey string `yaml:"resend_api_key"`
+	From         string `yaml:"from"`
 }
 
 // DiscordConfig holds Discord bot configuration
@@ -135,6 +142,10 @@ func LoadFromEnv() *Config {
 			BaseURL:       getEnvString("AUTH_BASE_URL", "http://localhost:8080"),
 			SecretKey:     os.Getenv("AUTH_SECRET_KEY"),
 			BCryptCost:    getEnvInt("BCRYPT_COST", 12),
+		},
+		Mail: MailConfig{
+			ResendAPIKey: os.Getenv("RESEND_API_KEY"),
+			From:         getEnvString("MAIL_FROM", ""),
 		},
 		Discord: DiscordConfig{
 			Token:          getEnvString("DISCORD_TOKEN", ""),

@@ -10,8 +10,8 @@ require (
 	github.com/redis/go-redis/v9 v9.11.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
-	go.starlark.net v0.0.0-20231101134539-556fd59b42f6
 	go.mongodb.org/mongo-driver v1.17.4
+	go.starlark.net v0.0.0-20231101134539-556fd59b42f6
 	golang.org/x/crypto v0.52.0
 )
 
@@ -23,6 +23,7 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/resend/resend-go/v3 v3.17.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect

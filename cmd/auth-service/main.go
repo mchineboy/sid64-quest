@@ -18,6 +18,7 @@ import (
 	"github.com/tylerhardison/race-condition-kingdom/internal/auth"
 	"github.com/tylerhardison/race-condition-kingdom/internal/database"
 	"github.com/tylerhardison/race-condition-kingdom/internal/game"
+	"github.com/tylerhardison/race-condition-kingdom/internal/mail"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 )
 
@@ -99,8 +100,8 @@ func main() {
 	router := mux.NewRouter()
 
 	// Browser account management shares the MUD's existing identity store.
-	accountHandler := account.New(db.GetPostgreSQLDB(), db.GetRedisClient(), authService, cfg)
-	for _, path := range []string{"/", "/account", "/account/style.css", "/login", "/signup"} {
+	accountHandler := account.New(db.GetPostgreSQLDB(), db.GetRedisClient(), authService, cfg, mail.NewResend(cfg, logger), logger)
+	for _, path := range []string{"/", "/account", "/account/style.css", "/login", "/signup", "/forgot", "/reset"} {
 		router.Handle(path, accountHandler)
 	}
 	// Authentication routes

@@ -22,10 +22,11 @@ var stylesheet string
 var pages = template.Must(template.New("account").Parse(markup))
 
 type page struct {
-	Mode, Title, CSRF, Error, Notice, Username, Email, CharacterName, Host string
-	User                                                                   *user
-	Characters                                                             []character
-	Count, Limit, TelnetPort, PETSCIIPort                                  int
+	Mode, Title, CSRF, Error, Notice, Username, Email, CharacterName, Host, Identity, Token string
+	User                                                                                     *user
+	Characters                                                                               []character
+	Count, Limit, TelnetPort, PETSCIIPort                                                    int
+	MailEnabled, TokenOK                                                                     bool
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +55,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mode = "login"
 	case "/signup":
 		mode = "signup"
+	case "/forgot":
+		mode = "forgot"
+	case "/reset":
+		mode = "reset"
 	default:
+		http.NotFound(w, r)
+		return
+	}
+	if (mode == "forgot" || mode == "reset") && !h.mailConfigured() {
 		http.NotFound(w, r)
 		return
 	}
@@ -93,7 +102,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	if mode != "account" && u != nil {
+	if (mode == "login" || mode == "signup" || mode == "forgot" || mode == "reset") && u != nil {
 		http.Redirect(w, r, "/account", http.StatusSeeOther)
 		return
 	}
@@ -104,7 +113,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	p := page{Mode: mode, CSRF: s.CSRF, User: u, Limit: maxCharacters, TelnetPort: h.cfg.Server.TelnetPort, PETSCIIPort: h.cfg.Server.PETSCIIPort}
+	p := page{Mode: mode, CSRF: s.CSRF, User: u, Limit: maxCharacters, TelnetPort: h.cfg.Server.TelnetPort, PETSCIIPort: h.cfg.Server.PETSCIIPort, MailEnabled: h.mailConfigured()}
 	base, _ := url.Parse(h.cfg.Auth.BaseURL)
 	if base != nil {
 		p.Host = base.Hostname()
@@ -112,8 +121,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if mode == "login" && r.URL.Query().Get("changed") == "1" {
 		p.Notice = "Password changed. Sign in again with your new password."
 	}
+	if mode == "login" && r.URL.Query().Get("reset") == "1" {
+		p.Notice = "Password updated. Sign in with your new password."
+	}
+	if mode == "reset" {
+		p.Token = strings.TrimSpace(r.URL.Query().Get("token"))
+		if r.Method == "POST" {
+			p.Token = strings.TrimSpace(r.FormValue("token"))
+		}
+		if p.Token == "" {
+			p.Error = "This reset link is missing or incomplete."
+		} else if _, e := h.peekResetToken(r.Context(), p.Token); e != nil {
+			p.Error = "This reset link is invalid or has expired."
+		} else {
+			p.TokenOK = true
+		}
+	}
 	if r.Method == "POST" {
-		if mode == "login" || mode == "signup" {
+		switch mode {
+		case "forgot":
+			if h.handleForgot(w, r, &p) {
+				return
+			}
+		case "reset":
+			if h.handleReset(w, r, &p) {
+				return
+			}
+		case "login", "signup":
 			limited, e := h.limited(r)
 			if e != nil {
 				http.Error(w, "Account service unavailable.", 503)
@@ -157,7 +191,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-		} else {
+		default:
 			if h.change(w, r, u, &p) {
 				return
 			}
@@ -184,6 +218,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.Title = "Welcome back"
 	case "signup":
 		p.Title = "Join SID64 Quest"
+	case "forgot":
+		p.Title = "Reset your password"
+	case "reset":
+		p.Title = "Choose a new password"
 	default:
 		p.Title = "Your account"
 	}
@@ -197,6 +235,93 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 	}
 	_, _ = w.Write(rendered.Bytes())
+}
+
+func (h *Handler) handleForgot(w http.ResponseWriter, r *http.Request, p *page) bool {
+	p.Identity = strings.TrimSpace(r.FormValue("identity"))
+	limited, err := h.forgotLimited(r, p.Identity)
+	if err != nil {
+		http.Error(w, "Account service unavailable.", 503)
+		return true
+	}
+	if limited {
+		w.Header().Set("Retry-After", "900")
+		http.Error(w, "Too many attempts. Try again in 15 minutes.", 429)
+		return true
+	}
+	// Always show the same notice whether or not the account exists.
+	p.Notice = forgotNotice
+	u, err := h.findActiveUser(r.Context(), p.Identity)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			if h.logger != nil {
+				h.logger.WithError(err).Error("Password reset lookup failed")
+			}
+		}
+		return false
+	}
+	raw, err := h.createResetToken(r.Context(), u.ID)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.WithError(err).Error("Password reset token create failed")
+		}
+		return false
+	}
+	if err = h.sendResetMail(r.Context(), u, raw); err != nil {
+		_ = h.redis.Del(r.Context(), resetKey(raw)).Err()
+		if h.logger != nil {
+			h.logger.WithError(err).Error("Password reset email failed")
+		}
+	}
+	return false
+}
+
+func (h *Handler) handleReset(w http.ResponseWriter, r *http.Request, p *page) bool {
+	p.Token = strings.TrimSpace(r.FormValue("token"))
+	password := r.FormValue("password")
+	if !p.TokenOK {
+		if p.Error == "" {
+			p.Error = "This reset link is invalid or has expired."
+		}
+		return false
+	}
+	if len(password) < 8 || len(password) > 72 {
+		p.Error = "Use a password between 8 and 72 bytes."
+		return false
+	}
+	if password != r.FormValue("confirm_password") {
+		p.Error = "The passwords don't match."
+		return false
+	}
+	userID, err := h.consumeResetToken(r.Context(), p.Token)
+	if err != nil {
+		p.TokenOK = false
+		p.Error = "This reset link is invalid or has expired."
+		return false
+	}
+	u, err := h.loadUser(r.Context(), userID)
+	if err != nil {
+		p.Error = "This reset link is invalid or has expired."
+		return false
+	}
+	hash, err := h.auth.HashPassword(password)
+	if err != nil {
+		p.Error = "Could not change your password."
+		return false
+	}
+	result, err := h.db.ExecContext(r.Context(), `UPDATE users SET password_hash=$1 WHERE id=$2 AND is_active=true`, hash, u.ID)
+	if err != nil {
+		p.Error = "Could not change your password."
+		return false
+	}
+	n, _ := result.RowsAffected()
+	if n != 1 {
+		p.Error = "Could not change your password."
+		return false
+	}
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", HttpOnly: true, Secure: h.secure(), SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	http.Redirect(w, r, "/login?reset=1", http.StatusSeeOther)
+	return true
 }
 
 func (h *Handler) change(w http.ResponseWriter, r *http.Request, u *user, p *page) bool {

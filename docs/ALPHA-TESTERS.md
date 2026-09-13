@@ -13,7 +13,7 @@ Please test login and character creation, the 40-column login/character/room scr
 
 Report the client and version, ANSI or PETSCII mode, time and timezone, exact commands, expected result, actual result, and a screenshot when useful. Never include passwords or pairing links/codes. Report issues directly to the operator; no invitations or issue reports are sent automatically.
 
-This is a small starter world. Password recovery is operator-assisted; there is no email reset flow, account deletion, or web gameplay. The Pi starts with a fresh world and does not import local development accounts.
+This is a small starter world. When Resend is configured on the server, use **Forgot your password?** on the sign-in page to reset by email. Otherwise recovery is operator-assisted. There is no account deletion or web gameplay. The Pi starts with a fresh world and does not import local development accounts.
 
 Hardware-test update: the Pi now also accepts direct LAN terminal connections. The configured Commodore at `192.168.2.2` can reach the Pi through the Mac relay at **192.168.2.1:26464**. Keep the Mac awake and perform HTTPS pairing there. See the VICE testing guide for relay start/stop instructions.
 

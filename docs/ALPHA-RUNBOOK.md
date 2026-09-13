@@ -99,6 +99,28 @@ docker compose exec -T postgres psql -X -U mud_user -d race_condition_kingdom -c
 
 ## Accounts
 
+### Login statistics release — 2026-09-09, 08:51 Pacific
+
+Auth is deployed as `rck:bb81666` from pushed `main` revision `bb81666`.
+Only auth was recreated; both core containers and the persistent edge retained
+their container IDs, with green still active. The previous auth image
+`rck:6d0e7d0` remains available for rollback by restoring `AUTH_IMAGE` and
+recreating only auth with `--no-deps`.
+
+Pre-release backup `backups/20260909T155027Z.dump` passed the disposable restore
+check (four migrations, five rooms, three characters). Release binaries and the
+protected prior environment are in `/srv/rck/releases/bb81666/`. Core restart
+tests, the full race-enabled Go suite, and `go vet ./...` passed. All production
+services were healthy after rollout; auth readiness and the public account
+redirect passed. `rck-admin stats` reported three registered users and three
+distinct users with recorded logins, including in the preceding 24 hours and
+seven days.
+
+Statistics use the existing account `last_login` timestamp. They include all
+accounts (including operators), count successful password authentication, and
+do not establish that a user entered gameplay. Signup alone does not necessarily
+record a login; these are account login counts, not a dedicated tester cohort.
+
 On the Pi in `/srv/rck`:
 
 ```sh
@@ -118,7 +140,9 @@ Builders use `script new`, `script edit`, and `script test` in their terminal. T
 
 Use `grant-admin USERNAME` only for trusted reviewers. `revoke-builder USERNAME` or `revoke-admin USERNAME` takes effect on the next scripting operation, including a save from an open editor. Removing builder permission does not remove a separate admin permission. `script disable <id>` stops an already-published script; revoking its author's access alone does not unpublish approved content. See [the scripting guide](SCRIPTING.md) for the full workflow and limits.
 
-For a password reset, use Bash and a hidden prompt, keeping the password out of command arguments and history:
+For a password reset when email recovery is unavailable, or as an operator
+fallback, use Bash and a hidden prompt, keeping the password out of command
+arguments and history:
 
 ```bash
 read -r -s -p 'New password: ' rck_password
@@ -128,6 +152,27 @@ unset rck_password
 ```
 
 Passwords must be 8–72 bytes. Resetting a password invalidates browser sessions on their next authenticated request. Disabling an account also rejects its next terminal command; password resets alone do not disconnect an existing terminal session. CLI actions print an outcome; retain operator records where needed. There is no comprehensive durable moderation audit system yet.
+
+### Resend email recovery
+
+Self-serve `/forgot` and `/reset` send mail through Resend when configured.
+Without `RESEND_API_KEY`, those routes return 404 and the login page tells
+players to contact the operator.
+
+1. Create a Resend account and API key (`re_…`).
+2. Add domain `mail.sid64.quest` in Resend. Disable open and click tracking for transactional mail.
+3. Publish the DNS records Resend shows (DKIM CNAMEs and related SPF/verification records) at the `sid64.quest` registrar.
+4. Wait until the domain is verified; send a dashboard test message.
+5. On the Pi, edit mode-600 `/srv/rck/.env` and set:
+
+```bash
+RESEND_API_KEY=re_…
+MAIL_FROM=SID64 Quest <noreply@mail.sid64.quest>
+```
+
+6. Restart auth (`docker compose up -d auth` from `/srv/rck`, or the usual systemd unit). Confirm https://sid64.quest/login links to `/forgot`, request a reset for a test account, and complete `/reset`.
+
+Reset links expire after one hour and are single-use. Keep `rck-admin reset-password` for mail outages.
 
 ## Backups and recovery
 
@@ -155,7 +200,7 @@ The Pi has fresh random database, Redis and auth secrets in mode-600 `/srv/rck/.
 
 Development setup generates new secrets for a new `.env`. Optional dashboard profiles require explicit PGADMIN_PASSWORD, MONGO_EXPRESS_PASSWORD and GRAFANA_PASSWORD values. The Pi does not run MongoDB or these dashboards.
 
-The alpha uses Tailscale Serve, not Funnel. Preserve other Serve routes. To disable only the MUD web route, use `sudo tailscale serve --https=8443 off`; do not reset the whole Serve configuration. Telnet traffic is protected by the tailnet tunnel, while browser credentials use HTTPS. Before public hosting, revisit transport protection, abuse limits, password recovery, monitoring and moderation.
+The alpha uses Tailscale Serve, not Funnel. Preserve other Serve routes. To disable only the MUD web route, use `sudo tailscale serve --https=8443 off`; do not reset the whole Serve configuration. Telnet traffic is protected by the tailnet tunnel, while browser credentials use HTTPS. Before public hosting, revisit transport protection, abuse limits, monitoring and moderation. Password email recovery is available when Resend is configured (see above).
 
 ## Release checks
 

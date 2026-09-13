@@ -75,10 +75,11 @@ The website handles account administration; gameplay stays in the terminal.
 - Up to five characters per account, character creation and renaming.
 - Saved character location, health, stamina, and gold displayed on the account page.
 - Email updates and password changes with current-password verification.
+- Self-serve password reset by email when Resend is configured (`/forgot`, `/reset`).
 - CSRF-protected forms, rate limits, and HttpOnly/SameSite session cookies; production cookies use Secure.
 - Twelve-hour browser sessions. Sign-out revokes the current session; changing the password invalidates existing browser sessions on subsequent requests.
 
-Renamed characters appear in existing terminal sessions after reconnecting. Password changes do not disconnect active terminal sessions. Email verification, emailed password recovery, account deletion, and character deletion are not implemented. Operators can reset passwords, disable or enable accounts, and view distinct-login test counts with `rck-admin stats`.
+Renamed characters appear in existing terminal sessions after reconnecting. Password changes do not disconnect active terminal sessions. Email verification, account deletion, and character deletion are not implemented. Emails used for recovery are not verified at signup. Operators can still reset passwords, disable or enable accounts, and view distinct-login test counts with `rck-admin stats`.
 
 ## Running deployment
 
