@@ -53,7 +53,7 @@ Migrations, fresh Pi secrets, TLS, rate limits, shared terminal presence, duplic
 
 ## 6. Expand only after the loop is fun
 
-- Combat and NPC behavior.
+- PvE combat implemented locally: Starlark-authored monsters, turn-based attacks, equipment effects, rewards, respawns, and defeat recovery. No PvP. Richer NPC behavior and leveling remain future work.
 - Economy, shops, banks, and auctions.
 - In-game Starlark scripting implemented: draft editor, isolated testing, admin publication, room/NPC/item hooks, state and bounded rewards. See [the scripting guide](docs/SCRIPTING.md).
 - Further builder tooling (room/item creation, world editing) and moderation.

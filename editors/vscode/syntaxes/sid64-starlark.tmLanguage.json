@@ -1,0 +1,144 @@
+{
+  "name": "SID64 Starlark",
+  "scopeName": "source.sid64-starlark",
+  "fileTypes": [
+    "star"
+  ],
+  "patterns": [
+    {
+      "name": "comment.line.number-sign.starlark",
+      "match": "#.*$"
+    },
+    {
+      "name": "string.quoted.triple.starlark",
+      "begin": "\\b[rR]\"\"\"",
+      "end": "\"\"\"",
+      "patterns": [
+        {
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.triple.starlark",
+      "begin": "\\b[rR]'''",
+      "end": "'''",
+      "patterns": [
+        {
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.starlark",
+      "begin": "\\b[rR]\"",
+      "end": "\"|$",
+      "patterns": [
+        {
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.starlark",
+      "begin": "\\b[rR]'",
+      "end": "'|$",
+      "patterns": [
+        {
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.triple.starlark",
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.starlark"
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.triple.starlark",
+      "begin": "'''",
+      "end": "'''",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.starlark"
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.starlark",
+      "begin": "\"",
+      "end": "\"|$",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.starlark"
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.starlark",
+      "begin": "'",
+      "end": "'|$",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.starlark"
+        }
+      ]
+    },
+    {
+      "name": "support.function.hook.sid64",
+      "match": "\\b(?:on_enter|on_look|on_say|on_command|on_talk|on_use)\\b"
+    },
+    {
+      "match": "\\b(def)\\s+([A-Za-z_]\\w*)",
+      "captures": {
+        "1": {
+          "name": "storage.type.function.starlark"
+        },
+        "2": {
+          "name": "entity.name.function.starlark"
+        }
+      }
+    },
+    {
+      "name": "support.function.sid64",
+      "match": "(?<!\\.)\\b(?:room|link|monster|tell|say|get_state|set_state|award_gold|heal)\\b(?=\\s*\\()"
+    },
+    {
+      "name": "support.function.builtin.starlark",
+      "match": "(?<!\\.)\\b(?:abs|all|any|bool|bytes|chr|dict|dir|enumerate|fail|float|getattr|hasattr|hash|int|len|list|max|min|ord|range|repr|reversed|sorted|str|tuple|type|zip)\\b(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.control.starlark",
+      "match": "\\b(?:and|break|continue|def|elif|else|for|if|in|lambda|not|or|pass|return)\\b"
+    },
+    {
+      "name": "constant.language.starlark",
+      "match": "\\b(?:True|False|None)\\b"
+    },
+    {
+      "name": "variable.other.property.sid64",
+      "match": "(?<=\\.)\\b(?:player|room|target|id|name|kind|command|text)\\b"
+    },
+    {
+      "name": "constant.numeric.starlark",
+      "match": "\\b(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|[0-9]+(?:\\.[0-9]*)?(?:[eE][+-]?[0-9]+)?)\\b|(?<!\\w)\\.[0-9]+(?:[eE][+-]?[0-9]+)?\\b"
+    },
+    {
+      "name": "keyword.operator.starlark",
+      "match": "[-+*/%=<>!&|^~]+"
+    },
+    {
+      "name": "punctuation.section.starlark",
+      "match": "[()\\[\\]{}]"
+    }
+  ]
+}

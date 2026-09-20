@@ -30,25 +30,29 @@ See the [tester guide](docs/ALPHA-TESTERS.md) for things to try and useful bug-r
 
 ## Implemented gameplay
 
-- **Five persistent rooms:** Town Square, North Gate, Market Lane, The Prancing Pony Inn, and Moonlit Docks.
+- **41 persistent rooms authored in Starlark:** the original town, countryside trails, woodland, a coastal loop, and three six-room dungeons. Type `trails` in Town Square for routes.
 - **A shared world across both terminal ports:** ANSI and PETSCII players see one another, share room chat, and appear in the same online-player list.
 - **Persistent progress:** location, inventory, equipment, health, stamina, gold, and delivery progress are stored in PostgreSQL.
 - **Items and equipment:** take and drop items, drink potions, equip and unequip weapons or armor, and inspect your inventory.
 - **Bulk pickup:** `take all` and `get all` collect available stacks up to the 50-item pack limit. Duplicate quest items stay behind. Pickups are transactional and protected against concurrent players taking the same items.
+- **Scripted dungeons:** solve the Bellkeeper Crypt riddle, restore Silvervein Mine's pumps, and align the Tideglass Grotto lens. Each offers a one-time reward per character, with saved puzzle progress. These are shared exploration and puzzle areas with optional PvE encounters in their side chambers.
+- **PvE combat:** `attack <monster>` trades one round with a hostile NPC for two stamina. Weapons add damage, armor reduces counterattacks, and victories grant gold and experience. Six Starlark-defined dungeon creatures respawn after a delay. Retreat through any exit; defeat returns you to the inn with 1 HP and your belongings. Players and friendly NPCs cannot be attacked.
 - **A repeatable objective:** return the misplaced harbor ledger from the docks to the Town Crier for a reward.
-- **Rest and recovery:** movement spends stamina; resting at the inn restores health and stamina.
+- **Rest and recovery:** movement spends stamina; resting at the Prancing Pony Inn, Forester's Lodge, or Keeper's Cottage restores health and stamina.
 - **A little levity:** try taking the fountain, a lamppost, or other scenery. Actual portable items take precedence over scenery jokes.
 
 | Commands | Purpose |
 |---|---|
 | `look`, `l`, `look <item>` | Inspect your surroundings or an item |
-| `north`, `south`, `east`, `west` / `n`, `s`, `e`, `w` | Move |
+| `north`, `south`, `east`, `west`, `up`, `down` / `n`, `s`, `e`, `w`, `u`, `d` | Move |
 | `where` | Show location and exits |
+| `trails` (Town Square) | Show dungeon routes and exploration tips |
 | `take <item>`, `get <item>`, `take all` | Pick up items |
 | `drop <item>`, `use <item>` | Drop an item or use a potion |
 | `equip <item>`, `unequip <item>` | Manage equipment |
 | `talk [name]`, `give <item> [name]` | Interact with NPCs |
-| `rest` | Recover at the inn |
+| `attack <monster>`, `hit <monster>`, `kill <monster>` | Fight one PvE round |
+| `rest` | Recover at an inn |
 | `say <message>`, `who` | Chat and see online players |
 | `stats`, `inventory`, `inv`, `i` | Check your character and pack |
 | `help`, `terminal ansi`, `terminal petscii` | Help and display preferences |
@@ -166,13 +170,23 @@ Stop local backing services with `make dev-stop`. Adding `-v` to a Compose `down
 
 ## In-game scripting
 
-In-game Starlark scripting is deployed: authoring and testing from ANSI/PETSCII terminals, admin-reviewed publication, room/NPC/item hooks, persistent script state, and bounded reward/healing APIs. Use `script` in the gateway; see [the scripting guide](docs/SCRIPTING.md) for contributor permission setup, examples and limits.
+In-game Starlark scripting is deployed: authoring and testing from ANSI/PETSCII terminals, admin-reviewed publication, room/NPC/item hooks, persistent script state, and bounded reward/healing APIs. The bundled world is also defined in Starlark using a separate bounded room/link API; dungeon behavior uses the same published room hooks as player-authored scripts. See [world content authoring](docs/WORLD-CONTENT.md). Use `script` in the gateway; see [the scripting guide](docs/SCRIPTING.md) for contributor permission setup, examples and limits.
+
+## Editor highlighting
+
+Local syntax-highlighting packages are included for VS Code and compatible editors, JetBrains IDEs, Sublime Text, TextMate, Vim/Neovim, and Emacs. They cover `.star` syntax, world/combat definitions, and game event APIs. VS Code packages also include authoring snippets.
+
+```sh
+python3 editors/tools/build.py --package
+```
+
+Installable archives are written to `build/editors/`. See [editor installation and development](editors/README.md) for each editor's setup and validation commands.
 
 ## Validation and remaining work
 
 The race-enabled Go suite covers account flows, authentication, migrations, gameplay persistence, PETSCII rendering/input, concurrent pickups, and session ownership. The public smoke test exercised HTTPS signup and pairing, ANSI/PETSCII chat, duplicate-login prevention, disconnect/reconnect, and saved location through the EC2 gateway.
 
-This is a **small public alpha**, not a finished persistent-world game. Combat, private messages, a working shop/economy, banks, auctions, room/item creation tools, and comprehensive moderation/monitoring remain future work. Some schemas and architecture documents describe features that are not implemented.
+This is a **small public alpha**, not a finished persistent-world game. Automatic combat, leveling, private messages, a working shop/economy, banks, auctions, live room/item creation tools, and comprehensive moderation/monitoring remain future work. Some schemas and architecture documents describe features that are not implemented.
 
 The most immediate operational issue is Pi storage: a slow boot logged SD-card busy stalls. Services eventually recovered automatically, but the planned NVMe migration remains important. A successful service restart and backup restore are not proof of recovery from every power-loss scenario. Broader real-hardware testing and invited-player feedback are still needed.
 

@@ -12,7 +12,7 @@ import (
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
 
-// WorldService owns the small persistent starter world used by the gateway.
+// WorldService owns the persistent shared world used by the gateway.
 type WorldService struct {
 	db    queries
 	pool  *sql.DB
@@ -23,9 +23,8 @@ func NewWorldService(db *sql.DB) *WorldService {
 	return &WorldService{db: db, pool: db}
 }
 
-// EnsureStarterWorld creates the compact initial map and repairs its exits on
-// every startup. It is safe to call repeatedly and gives old local databases a
-// usable world without asking developers to destroy their data volumes.
+// EnsureStarterWorld installs bundled Starlark content transactionally. Existing
+// room identities, player progress and administrator script edits are preserved.
 func (ws *WorldService) EnsureStarterWorld(ctx context.Context) error {
 	tx, err := ws.beginTx(ctx)
 	if err != nil {
@@ -36,72 +35,9 @@ func (ws *WorldService) EnsureStarterWorld(ctx context.Context) error {
 		return err
 	}
 
-	rooms := []struct {
-		name, description, shortDescription, roomType string
-	}{
-		{
-			name:             "Town Square",
-			description:      "The heart of the kingdom, where a fountain murmurs over old cobblestones. Paths lead toward the gate, the market, and a welcome inn.",
-			shortDescription: "A bustling square with a fountain",
-			roomType:         "safe",
-		},
-		{
-			name:             "North Gate",
-			description:      "Weathered stone gates open onto a quiet road. A bored guard watches the town and pretends not to enjoy the gossip.",
-			shortDescription: "The northern gate of the town",
-			roomType:         "safe",
-		},
-		{
-			name:             "Market Lane",
-			description:      "Canvas awnings snap overhead. A baker, a tinker, and a suspiciously cheerful potion seller compete for your attention.",
-			shortDescription: "A busy market lane",
-			roomType:         "shop",
-		},
-		{
-			name:             "The Prancing Pony Inn",
-			description:      "A low fire, a long bar, and a room full of rumors make this the safest place to rest after a very short adventure.",
-			shortDescription: "A warm and welcoming inn",
-			roomType:         "inn",
-		},
-		{
-			name:             "Moonlit Docks",
-			description:      "Black water taps against the pilings. A small boat bobs at the end of the pier, which feels like a promise for another day.",
-			shortDescription: "Quiet docks beneath the moon",
-			roomType:         "normal",
-		},
-	}
-
-	ids := make(map[string]uuid.UUID, len(rooms))
-	for _, room := range rooms {
-		var id uuid.UUID
-		err := tx.QueryRowContext(ctx, `SELECT id FROM rooms WHERE name = $1 ORDER BY created_at LIMIT 1`, room.name).Scan(&id)
-		if err == sql.ErrNoRows {
-			err = tx.QueryRowContext(ctx, `
-				INSERT INTO rooms (name, description, short_description, room_type, exits, flags)
-				VALUES ($1, $2, $3, $4, '{}'::jsonb, '{}'::jsonb)
-				RETURNING id`, room.name, room.description, room.shortDescription, room.roomType).Scan(&id)
-		}
-		if err != nil {
-			return fmt.Errorf("ensure room %q: %w", room.name, err)
-		}
-		ids[room.name] = id
-	}
-
-	exits := map[string]map[string]uuid.UUID{
-		"Town Square":           {"north": ids["North Gate"], "east": ids["Market Lane"], "south": ids["The Prancing Pony Inn"]},
-		"North Gate":            {"south": ids["Town Square"], "north": ids["Moonlit Docks"]},
-		"Market Lane":           {"west": ids["Town Square"]},
-		"The Prancing Pony Inn": {"north": ids["Town Square"]},
-		"Moonlit Docks":         {"south": ids["North Gate"]},
-	}
-	for name, roomExits := range exits {
-		data, err := json.Marshal(roomExits)
-		if err != nil {
-			return fmt.Errorf("encode exits for %q: %w", name, err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE rooms SET exits = $1::jsonb WHERE id = $2`, data, ids[name]); err != nil {
-			return fmt.Errorf("update exits for %q: %w", name, err)
-		}
+	ids, err := installWorldContent(ctx, tx)
+	if err != nil {
+		return err
 	}
 
 	if _, err := tx.ExecContext(ctx, `UPDATE characters SET current_room_id = $1 WHERE current_room_id IS NULL`, ids["Town Square"]); err != nil {

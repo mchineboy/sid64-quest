@@ -1,0 +1,72 @@
+{
+  "on_enter": {
+    "prefix": "on_enter",
+    "body": [
+      "def on_enter(event):",
+      "    ${1:pass}"
+    ],
+    "description": "SID64 event hook; check the script kind before attaching."
+  },
+  "on_look": {
+    "prefix": "on_look",
+    "body": [
+      "def on_look(event):",
+      "    ${1:pass}"
+    ],
+    "description": "SID64 event hook; check the script kind before attaching."
+  },
+  "on_say": {
+    "prefix": "on_say",
+    "body": [
+      "def on_say(event):",
+      "    ${1:pass}"
+    ],
+    "description": "SID64 event hook; check the script kind before attaching."
+  },
+  "on_command": {
+    "prefix": "on_command",
+    "body": [
+      "def on_command(event):",
+      "    ${1:pass}"
+    ],
+    "description": "SID64 event hook; check the script kind before attaching."
+  },
+  "on_talk": {
+    "prefix": "on_talk",
+    "body": [
+      "def on_talk(event):",
+      "    ${1:pass}"
+    ],
+    "description": "SID64 event hook; check the script kind before attaching."
+  },
+  "on_use": {
+    "prefix": "on_use",
+    "body": [
+      "def on_use(event):",
+      "    ${1:pass}"
+    ],
+    "description": "SID64 event hook; check the script kind before attaching."
+  },
+  "sid-room": {
+    "prefix": "sid-room",
+    "body": [
+      "room(\"${1:key}\", \"${2:Room name}\", \"${3:Description}\", kind=\"${4:normal}\")"
+    ],
+    "description": "Startup-only world definition"
+  },
+  "sid-link": {
+    "prefix": "sid-link",
+    "body": [
+      "link(\"${1:from_room}\", \"${2:north}\", \"${3:to_room}\")"
+    ],
+    "description": "Startup-only world definition"
+  },
+  "sid-monster": {
+    "prefix": "sid-monster",
+    "body": [
+      "monster(\"${1:key}\", \"${2:room_key}\", \"${3:Name}\", \"${4:Description}\",",
+      "        health=${5:20}, attack=${6:5}, gold=${7:5}, experience=${8:10}, respawn=${9:300})"
+    ],
+    "description": "Startup-only world definition"
+  }
+}

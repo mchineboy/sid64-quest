@@ -652,8 +652,10 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 			return err
 		}
 		return s.examineItem(conn, strings.Join(args, " "))
-	case "north", "n", "south", "s", "east", "e", "west", "w":
+	case "north", "n", "south", "s", "east", "e", "west", "w", "up", "u", "down", "d":
 		return s.moveCharacter(conn, command)
+	case "attack", "hit", "kill":
+		return s.attackNPC(conn, strings.Join(args, " "))
 	case "take", "get":
 		if len(args) == 0 {
 			conn.SendError("Take what?")
@@ -788,7 +790,11 @@ func (s *Server) sendLook(conn *Connection) error {
 
 	npcNames := make([]string, 0, len(npcs))
 	for _, npc := range npcs {
-		npcNames = append(npcNames, npc.Name)
+		name := npc.Name
+		if npc.Hostile {
+			name = fmt.Sprintf("%s [hostile, HP %d/%d]", npc.Name, npc.Health, npc.MaxHealth)
+		}
+		npcNames = append(npcNames, name)
 	}
 	itemNames := make([]string, 0, len(ground))
 	for _, item := range ground {
@@ -828,6 +834,26 @@ func (s *Server) examineItem(conn *Connection, query string) error {
 		if game.MatchesName(item.Name, query) {
 			return conn.SendMessage(item.Item.Description)
 		}
+	}
+	npcs, err := s.world.ListRoomNPCs(conn.Context, conn.Room.ID)
+	if err != nil {
+		return err
+	}
+	var matches []string
+	for _, npc := range npcs {
+		if game.MatchesName(npc.Name, query) {
+			text := npc.Description
+			if npc.Hostile {
+				text += fmt.Sprintf(" Hostile. HP %d/%d. Use attack %s to fight.", npc.Health, npc.MaxHealth, npc.Name)
+			}
+			matches = append(matches, text)
+		}
+	}
+	if len(matches) == 1 {
+		return conn.SendMessage(matches[0])
+	}
+	if len(matches) > 1 {
+		return conn.SendError("That name is ambiguous; use a full name.")
 	}
 	conn.SendError(fmt.Sprintf("You do not see %q here.", query))
 	return nil

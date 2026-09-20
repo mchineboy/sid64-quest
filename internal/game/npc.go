@@ -11,9 +11,12 @@ import (
 )
 
 func (ws *WorldService) ListRoomNPCs(ctx context.Context, roomID uuid.UUID) ([]*models.NPC, error) {
+	if err := respawnNPCs(ctx, ws.db, roomID); err != nil {
+		return nil, err
+	}
 	rows, err := ws.db.QueryContext(ctx, `
-		SELECT id, name, description, room_id, health, max_health, level, created_at
-		FROM npcs WHERE room_id = $1 ORDER BY name`, roomID)
+		SELECT id, name, description, room_id, health, max_health, level, hostile, created_at
+		FROM npcs WHERE room_id = $1 AND health > 0 ORDER BY name`, roomID)
 	if err != nil {
 		return nil, fmt.Errorf("list npcs: %w", err)
 	}
@@ -22,7 +25,7 @@ func (ws *WorldService) ListRoomNPCs(ctx context.Context, roomID uuid.UUID) ([]*
 	var result []*models.NPC
 	for rows.Next() {
 		var npc models.NPC
-		if err := rows.Scan(&npc.ID, &npc.Name, &npc.Description, &npc.RoomID, &npc.Health, &npc.MaxHealth, &npc.Level, &npc.CreatedAt); err != nil {
+		if err := rows.Scan(&npc.ID, &npc.Name, &npc.Description, &npc.RoomID, &npc.Health, &npc.MaxHealth, &npc.Level, &npc.Hostile, &npc.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan npc: %w", err)
 		}
 		result = append(result, &npc)
@@ -58,6 +61,9 @@ func (ws *WorldService) Talk(ctx context.Context, characterID, roomID uuid.UUID,
 		}
 	}
 
+	if npc.Hostile {
+		return fmt.Sprintf("%s watches you warily. Use attack <name> to fight, or leave by any exit.", npc.Name), nil
+	}
 	if npc.Name != npcTownCrier {
 		return fmt.Sprintf("%s nods, but has nothing useful to say.", npc.Name), nil
 	}
@@ -118,6 +124,7 @@ func (ws *WorldService) GiveItem(ctx context.Context, characterID, roomID uuid.U
 			return "", nil, err
 		}
 	}
+
 	if npc.Name != npcTownCrier {
 		return "", nil, fmt.Errorf("%s does not want that", npc.Name)
 	}
@@ -214,8 +221,8 @@ func (ws *WorldService) Rest(ctx context.Context, characterID, roomID uuid.UUID)
 
 func (ws *WorldService) listRoomNPCsTx(ctx context.Context, tx transaction, roomID uuid.UUID) ([]*models.NPC, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, name, description, room_id, health, max_health, level, created_at
-		FROM npcs WHERE room_id = $1 ORDER BY name`, roomID)
+		SELECT id, name, description, room_id, health, max_health, level, hostile, created_at
+		FROM npcs WHERE room_id = $1 AND health > 0 ORDER BY name`, roomID)
 	if err != nil {
 		return nil, fmt.Errorf("list npcs: %w", err)
 	}
@@ -224,7 +231,7 @@ func (ws *WorldService) listRoomNPCsTx(ctx context.Context, tx transaction, room
 	var result []*models.NPC
 	for rows.Next() {
 		var npc models.NPC
-		if err := rows.Scan(&npc.ID, &npc.Name, &npc.Description, &npc.RoomID, &npc.Health, &npc.MaxHealth, &npc.Level, &npc.CreatedAt); err != nil {
+		if err := rows.Scan(&npc.ID, &npc.Name, &npc.Description, &npc.RoomID, &npc.Health, &npc.MaxHealth, &npc.Level, &npc.Hostile, &npc.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan npc: %w", err)
 		}
 		result = append(result, &npc)

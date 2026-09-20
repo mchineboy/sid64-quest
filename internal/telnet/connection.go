@@ -310,7 +310,9 @@ AVAILABLE COMMANDS
   north, n             Move north when an exit exists
   south, s             Move south when an exit exists
   east, e              Move east when an exit exists
+  attack <monster>     Fight one round (2 stamina); leave by any exit to retreat
   west, w              Move west when an exit exists
+  up, u / down, d      Climb or descend when an exit exists
   take, get <item|all> Pick up items
   drop <item>          Drop an item in the room
   use <item>           Drink a potion

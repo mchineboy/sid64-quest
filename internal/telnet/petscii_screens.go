@@ -94,14 +94,14 @@ func (c *Connection) petsciiRoom(npcs, items, others []string) string {
 }
 
 func petsciiHelp() string {
-	return petHeading("Commands") + petLine(`LOOK / L       Room or LOOK <item>
-N S E W        Move
+	return petHeading("Commands") + petLine(`LOOK / L       Room or LOOK <name>
+N S E W U D    Move
+ATTACK <name>  Fight NPC (2 stamina)
 WHERE          Location and exits
 TAKE <item|all> Pick up
 DROP <item>    Put down
 USE <item>     Drink potion
-EQUIP <item>   Wear or wield
-UNEQUIP <item> Remove equipment
+EQUIP / UNEQUIP <item>
 TALK [name]    Speak to an NPC
 GIVE <item> [name]
 REST           Recover at the inn

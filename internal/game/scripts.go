@@ -103,12 +103,12 @@ func (ws *WorldService) ScriptCommand(ctx context.Context, actor uuid.UUID, req 
 		return []ScriptDraft{d}, tx.Commit()
 	}
 	var d ScriptDraft
-	var owner uuid.UUID
+	var owner uuid.NullUUID
 	err = tx.QueryRowContext(ctx, `SELECT id,name,script_type,content,revision,is_active,published_revision,created_by FROM scripts WHERE id=$1 FOR UPDATE`, req.ID).Scan(&d.ID, &d.Name, &d.Kind, &d.Content, &d.Revision, &d.Active, &d.PublishedRevision, &owner)
 	if err != nil {
 		return nil, fmt.Errorf("script not found")
 	}
-	if !admin && owner != actor {
+	if !admin && (!owner.Valid || owner.UUID != actor) {
 		return nil, fmt.Errorf("only the author or an admin can access this script")
 	}
 	action := req.Action

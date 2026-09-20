@@ -22,7 +22,10 @@ func TestNormalizeDirection(t *testing.T) {
 	assert.Equal(t, "east", NormalizeDirection("east"))
 	assert.Equal(t, "west", NormalizeDirection("west"))
 	assert.Equal(t, "west", NormalizeDirection("w"))
-	assert.Equal(t, "", NormalizeDirection("up"))
+	assert.Equal(t, "up", NormalizeDirection("up"))
+	assert.Equal(t, "up", NormalizeDirection("u"))
+	assert.Equal(t, "down", NormalizeDirection("D"))
+	assert.Equal(t, "", NormalizeDirection("sideways"))
 }
 
 func TestPropertyIntAndBool(t *testing.T) {

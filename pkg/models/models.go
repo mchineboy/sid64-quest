@@ -175,6 +175,7 @@ type Script struct {
 
 // NPC represents a non-player character
 type NPC struct {
+	Hostile     bool                   `json:"hostile" db:"hostile"`
 	ID          uuid.UUID              `json:"id" db:"id"`
 	Name        string                 `json:"name" db:"name"`
 	Description string                 `json:"description" db:"description"`

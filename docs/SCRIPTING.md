@@ -1,6 +1,8 @@
 # In-game Starlark scripting
 
-Privileged players can now author, test and publish Starlark scripts from either terminal. This implementation supports room events and custom commands, NPC conversations, and carried-item use. Scripts can send messages, store persistent per-player state, award gold and heal. Creating rooms, changing exits, spawning items, combat hooks and a separate editable world are still future builder features.
+Privileged players can now author, test and publish Starlark scripts from either terminal. This implementation supports room events and custom commands, NPC conversations, and carried-item use. Scripts can send messages, store persistent per-player state, award gold and heal. Bundled world content can now define rooms, reciprocal exits, and hostile NPC encounters using a separate, startup-only Starlark API; see [world content authoring](WORLD-CONTENT.md). Live room/exit editing, spawning items, runtime combat hooks and a separate editable world remain future builder features.
+
+For local `.star` authoring, [editor highlighting packages](../editors/README.md) cover major editors and the SID64 APIs.
 
 ## Access and publication
 
@@ -13,7 +15,7 @@ rck-admin grant-admin USERNAME
 
 `revoke-builder` and `revoke-admin` remove those individual permissions. Admin implies builder access. Permissions are checked against the database on every scripting command and editor operation; no reconnect is required after revocation. Builders can access their own drafts; admins can review all drafts. Admins alone can publish, attach, detach and disable scripts. An admin can publish their own work.
 
-Deployment requires rebuilding the gateway and admin binary. Migration `003_scripting.sql` runs through the existing startup migrator. No additional service or executable is needed: the gateway starts a disposable copy of itself for each evaluation. Installing the migration alone does not publish any scripts or grant permissions.
+Deployment requires rebuilding the gateway and admin binary. Migrations run through the existing startup migrator. `003_scripting.sql` installs scripting, and `005_world_content.sql` adds bundled world identity tracking and permits release-authored scripts without a player owner. No additional service or executable is needed: the gateway starts a disposable copy of itself for each evaluation. Installing the migrations alone does not publish scripts or grant permissions. World startup installs the bundled dungeon scripts; player-authored scripts still require admin publication.
 
 ## First script
 

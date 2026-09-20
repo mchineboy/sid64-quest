@@ -1,0 +1,58 @@
+{
+  "name": "sid64-starlark",
+  "displayName": "SID64 Starlark",
+  "version": "0.1.0",
+  "description": "Starlark syntax, SID64 Quest world and combat definitions, and game event hooks.",
+  "publisher": "sid64-quest",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tylerhardison/race-condition-kingdom"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "sid64-starlark",
+        "aliases": [
+          "SID64 Starlark"
+        ],
+        "extensions": [
+          ".star"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sid64-starlark",
+        "scopeName": "source.sid64-starlark",
+        "path": "./syntaxes/sid64-starlark.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "sid64-starlark",
+        "path": "./snippets/sid64.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[sid64-starlark]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4
+      }
+    }
+  }
+}

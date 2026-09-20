@@ -21,6 +21,10 @@ func NormalizeDirection(command string) string {
 		return "east"
 	case "west", "w":
 		return "west"
+	case "up", "u":
+		return "up"
+	case "down", "d":
+		return "down"
 	default:
 		return ""
 	}

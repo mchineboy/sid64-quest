@@ -1,0 +1,11 @@
+{
+  "name": "SID64 Starlark",
+  "version": "0.1.0",
+  "extensions": ["star"],
+  "world": ["room", "link", "monster"],
+  "game": ["tell", "say", "get_state", "set_state", "award_gold", "heal"],
+  "hooks": ["on_enter", "on_look", "on_say", "on_command", "on_talk", "on_use"],
+  "keywords": ["and", "break", "continue", "def", "elif", "else", "for", "if", "in", "lambda", "not", "or", "pass", "return"],
+  "builtins": ["abs", "all", "any", "bool", "bytes", "chr", "dict", "dir", "enumerate", "fail", "float", "getattr", "hasattr", "hash", "int", "len", "list", "max", "min", "ord", "range", "repr", "reversed", "sorted", "str", "tuple", "type", "zip"],
+  "fields": ["player", "room", "target", "id", "name", "kind", "command", "text"]
+}

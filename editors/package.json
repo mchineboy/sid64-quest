@@ -1,0 +1,6 @@
+{
+  "name": "sid64-editor-tests",
+  "private": true,
+  "scripts": {"test": "node tests/grammar.cjs"},
+  "devDependencies": {"vscode-textmate": "9.3.2", "vscode-oniguruma": "1.7.0"}
+}

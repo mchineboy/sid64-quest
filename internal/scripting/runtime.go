@@ -40,6 +40,7 @@ type Message struct {
 	Text string `json:"text"`
 }
 type Output struct {
+	World    *WorldDefinition  `json:"world,omitempty"`
 	Messages []Message         `json:"messages"`
 	State    map[string]string `json:"state"`
 	Gold     int               `json:"gold"`
@@ -144,6 +145,9 @@ func evaluate(in Input) (Output, error) {
 	thread.SetMaxExecutionSteps(MaxSteps)
 	// No Load callback: filesystem, networking and external modules are unavailable.
 	thread.Print = func(t *starlark.Thread, msg string) { t.Cancel("use tell() or say() instead of print()") }
+	if in.Kind == "world" {
+		return evaluateWorld(thread, in.Source)
+	}
 	initializing := true
 	emit := func(room bool) *starlark.Builtin {
 		name := "tell"
