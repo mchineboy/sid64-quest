@@ -35,6 +35,10 @@ type Character struct {
 	CurrentRoomID   *uuid.UUID `json:"current_room_id" db:"current_room_id"`
 	LastRest        time.Time  `json:"last_rest" db:"last_rest"`
 	IsSleeping      bool       `json:"is_sleeping" db:"is_sleeping"`
+	IsDead          bool       `json:"is_dead" db:"is_dead"`
+	DiedAt          *time.Time `json:"died_at,omitempty" db:"died_at"`
+	ResurrectionAt  *time.Time `json:"resurrection_ready_at,omitempty" db:"resurrection_ready_at"`
+	DeathRoomID     *uuid.UUID `json:"death_room_id,omitempty" db:"death_room_id"`
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
 	Deliveries      int        `json:"deliveries,omitempty"`
 }

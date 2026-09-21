@@ -27,6 +27,8 @@ type WorldRoom struct {
 type WorldMonster struct {
 	Key, Room, Name, Description                       string
 	Health, Attack, Defense, Gold, Experience, Respawn int
+	Loot                                               string
+	Drop                                               int
 }
 
 var worldKey = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
@@ -44,13 +46,13 @@ func evaluateWorld(thread *starlark.Thread, source string) (Output, error) {
 	pre := starlark.StringDict{
 		"monster": starlark.NewBuiltin("monster", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			m := WorldMonster{Health: 20, Attack: 5, Respawn: 300}
-			if err := starlark.UnpackArgs(b.Name(), args, kwargs, "key", &m.Key, "room", &m.Room, "name", &m.Name, "description", &m.Description, "health?", &m.Health, "attack?", &m.Attack, "defense?", &m.Defense, "gold?", &m.Gold, "experience?", &m.Experience, "respawn?", &m.Respawn); err != nil {
+			if err := starlark.UnpackArgs(b.Name(), args, kwargs, "key", &m.Key, "room", &m.Room, "name", &m.Name, "description", &m.Description, "health?", &m.Health, "attack?", &m.Attack, "defense?", &m.Defense, "gold?", &m.Gold, "experience?", &m.Experience, "respawn?", &m.Respawn, "loot?", &m.Loot, "drop?", &m.Drop); err != nil {
 				return nil, err
 			}
-			if !worldKey.MatchString(m.Key) || !worldKey.MatchString(m.Room) || !clean(m.Name, 100) || !clean(m.Description, 512) {
+			if !worldKey.MatchString(m.Key) || !worldKey.MatchString(m.Room) || !clean(m.Name, 100) || !clean(m.Description, 512) || (m.Loot != "" && !clean(m.Loot, 100)) {
 				return nil, fmt.Errorf("invalid monster key, room or text")
 			}
-			if m.Health < 1 || m.Health > 1000 || m.Attack < 1 || m.Attack > 100 || m.Defense < 0 || m.Defense > 50 || m.Gold < 0 || m.Gold > 100 || m.Experience < 0 || m.Experience > 1000 || m.Respawn < 30 || m.Respawn > 3600 {
+			if m.Health < 1 || m.Health > 1000 || m.Attack < 1 || m.Attack > 100 || m.Defense < 0 || m.Defense > 50 || m.Gold < 0 || m.Gold > 100 || m.Experience < 0 || m.Experience > 1000 || m.Respawn < 30 || m.Respawn > 3600 || m.Drop < 0 || m.Drop > 10000 || (m.Loot == "") != (m.Drop == 0) {
 				return nil, fmt.Errorf("monster stats out of bounds")
 			}
 			if monsterKeys[m.Key] || len(world.Monsters) >= 32 {
@@ -74,8 +76,8 @@ func evaluateWorld(thread *starlark.Thread, source string) (Output, error) {
 			if _, exists := indexes[r.Key]; exists {
 				return nil, fmt.Errorf("duplicate room %q", r.Key)
 			}
-			if len(world.Rooms) >= 64 {
-				return nil, fmt.Errorf("world room limit exceeded (64)")
+			if len(world.Rooms) >= 96 {
+				return nil, fmt.Errorf("world room limit exceeded (96)")
 			}
 			indexes[r.Key] = len(world.Rooms)
 			world.Rooms = append(world.Rooms, r)

@@ -2,14 +2,21 @@ package game
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
 	"fmt"
+	"math/big"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
 
-const attackStaminaCost = 2
+const (
+	attackStaminaCost = 2
+	resurrectionDelay = 10 * time.Minute
+)
 
 type CombatResult struct {
 	Message  string
@@ -57,11 +64,12 @@ func (ws *WorldService) Attack(ctx context.Context, characterID, roomID uuid.UUI
 		return result, err
 	}
 	var hp, stamina int
-	if err = tx.QueryRowContext(ctx, `SELECT health,stamina FROM characters WHERE id=$1`, characterID).Scan(&hp, &stamina); err != nil {
+	var isDead bool
+	if err = tx.QueryRowContext(ctx, `SELECT health,stamina,is_dead FROM characters WHERE id=$1`, characterID).Scan(&hp, &stamina, &isDead); err != nil {
 		return result, err
 	}
-	if hp <= 0 {
-		return result, fmt.Errorf("you must recover before attacking")
+	if isDead || hp <= 0 {
+		return result, fmt.Errorf("the dead cannot attack; use resurrect in the Hall of Returning")
 	}
 	if stamina < attackStaminaCost {
 		return result, fmt.Errorf("you need 2 stamina to attack; retreat and rest or use a stamina potion")
@@ -86,9 +94,10 @@ func (ws *WorldService) Attack(ctx context.Context, characterID, roomID uuid.UUI
 	if err != nil {
 		return result, fmt.Errorf("choose one monster here by name; players cannot be attacked: %w", err)
 	}
-	var enemyHP, attack, defense, gold, xp, respawn int
+	var enemyHP, attack, defense, gold, xp, respawn, lootChance int
+	var lootItem sql.NullString
 	var hostile bool
-	if err = tx.QueryRowContext(ctx, `SELECT health,hostile,attack_damage,defense,reward_gold,reward_experience,respawn_seconds FROM npcs WHERE id=$1 AND room_id=$2 FOR UPDATE`, target.ID, roomID).Scan(&enemyHP, &hostile, &attack, &defense, &gold, &xp, &respawn); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT health,hostile,attack_damage,defense,reward_gold,reward_experience,respawn_seconds,loot_item_id,loot_chance FROM npcs WHERE id=$1 AND room_id=$2 FOR UPDATE`, target.ID, roomID).Scan(&enemyHP, &hostile, &attack, &defense, &gold, &xp, &respawn, &lootItem, &lootChance); err != nil {
 		return result, err
 	}
 	if !hostile {
@@ -106,27 +115,48 @@ func (ws *WorldService) Attack(ctx context.Context, characterID, roomID uuid.UUI
 	enemyHP -= damage
 	stamina -= attackStaminaCost
 	result.Message = fmt.Sprintf("You hit %s for %d damage.", target.Name, damage)
-	earnedGold, earnedXP := 0, 0
+	earnedXP := 0
 	if enemyHP == 0 {
-		earnedGold, earnedXP = gold, xp
-		result.Message += fmt.Sprintf(" Victory! You gain %d gold and %d experience.", gold, xp)
+		earnedXP = xp
+		if _, err = tx.ExecContext(ctx, `DELETE FROM monster_corpses WHERE expires_at<=now()`); err != nil {
+			return result, err
+		}
+		currency := GoldValue(gold) + int64(secureRandom(99)+1)*CopperPerSilver + int64(secureRandom(99)+1)
+		var dropped interface{}
+		if lootItem.Valid && secureRandom(10000) < lootChance {
+			dropped = lootItem.String
+		}
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO monster_corpses(npc_id,room_id,owner_id,monster_name,currency_value,item_id,item_looted)
+			VALUES($1,$2,$3,$4,$5,$6::uuid,$6::uuid IS NULL)`,
+			target.ID, roomID, characterID, target.Name, currency, dropped); err != nil {
+			return result, fmt.Errorf("create corpse: %w", err)
+		}
+		result.Message += fmt.Sprintf(" Victory! You gain %d experience. The corpse carries coin; use loot %s.", xp, target.Name)
 	} else {
 		hit := min(hp, max(1, attack-armor))
 		hp -= hit
 		result.Message += fmt.Sprintf(" %s has %d/%d HP and hits you for %d.", target.Name, enemyHP, target.MaxHealth, hit)
 		if hp == 0 {
-			if err = tx.QueryRowContext(ctx, `SELECT room_id FROM world_content_rooms WHERE content_key='inn'`).Scan(&result.RoomID); err != nil {
+			if err = tx.QueryRowContext(ctx, `SELECT room_id FROM world_content_rooms WHERE content_key='hall_returning'`).Scan(&result.RoomID); err != nil {
 				return result, err
 			}
-			hp = 1
 			result.Defeated = true
-			result.Message += " You fall and are carried to the Prancing Pony Inn with 1 HP. Your belongings are safe. Use rest to recover."
+			result.Message += " You die. Crypt wardens carry you to the Hall of Returning. Pay 100 gold now or wait ten minutes, then use resurrect."
 		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE npcs SET health=$2,respawn_at=CASE WHEN $2=0 THEN now()+$3*interval '1 second' ELSE NULL END WHERE id=$1`, target.ID, enemyHP, respawn); err != nil {
 		return result, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE characters SET health=$2,stamina=$3,gold=gold+$4,experience=experience+$5,current_room_id=$6 WHERE id=$1`, characterID, hp, stamina, earnedGold, earnedXP, result.RoomID); err != nil {
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE characters
+		SET health=$2,stamina=$3,experience=experience+$4,current_room_id=$5,
+		    is_dead=$6,
+		    died_at=CASE WHEN $6 THEN now() ELSE died_at END,
+		    resurrection_ready_at=CASE WHEN $6 THEN now()+$7*interval '1 second' ELSE resurrection_ready_at END,
+		    death_room_id=CASE WHEN $6 THEN $8 ELSE death_room_id END
+		WHERE id=$1`,
+		characterID, hp, stamina, earnedXP, result.RoomID, result.Defeated, int(resurrectionDelay/time.Second), roomID); err != nil {
 		return result, err
 	}
 	result.Message += fmt.Sprintf(" HP %d; stamina %d.", hp, stamina)
@@ -134,4 +164,15 @@ func (ws *WorldService) Attack(ctx context.Context, characterID, roomID uuid.UUI
 		return CombatResult{}, err
 	}
 	return result, nil
+}
+
+func secureRandom(limit int) int {
+	if limit <= 0 {
+		return 0
+	}
+	value, err := rand.Int(rand.Reader, big.NewInt(int64(limit)))
+	if err != nil {
+		return 0
+	}
+	return int(value.Int64())
 }

@@ -136,7 +136,15 @@ func installWorldContent(ctx context.Context, tx transaction) (map[string]uuid.U
 	}
 	for _, m := range world.Monsters {
 		id := uuid.NewSHA1(uuid.NameSpaceURL, []byte("sid64.quest/world/monsters/"+m.Key))
-		_, err := tx.ExecContext(ctx, `INSERT INTO npcs(id,name,description,room_id,health,max_health,hostile,attack_damage,defense,reward_gold,reward_experience,respawn_seconds) VALUES($1,$2,$3,$4,$5,$5,true,$6,$7,$8,$9,$10) ON CONFLICT(id) DO NOTHING`, id, m.Name, m.Description, ids[m.Room], m.Health, m.Attack, m.Defense, m.Gold, m.Experience, m.Respawn)
+		var loot interface{}
+		if m.Loot != "" {
+			loot = m.Loot
+		}
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO npcs(id,name,description,room_id,health,max_health,hostile,attack_damage,defense,reward_gold,reward_experience,respawn_seconds,loot_item_id,loot_chance)
+			VALUES($1,$2,$3,$4,$5,$5,true,$6,$7,$8,$9,$10,(SELECT id FROM items WHERE name=$11),$12)
+			ON CONFLICT(id) DO NOTHING`,
+			id, m.Name, m.Description, ids[m.Room], m.Health, m.Attack, m.Defense, m.Gold, m.Experience, m.Respawn, loot, m.Drop)
 		if err != nil {
 			return nil, fmt.Errorf("install monster %s: %w", m.Key, err)
 		}

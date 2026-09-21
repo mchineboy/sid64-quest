@@ -11,7 +11,7 @@ import (
 func TestBundledWorldRoutes(t *testing.T) {
 	world, _, err := bundledWorld(context.Background())
 	require.NoError(t, err)
-	require.Len(t, world.Rooms, 41)
+	require.Len(t, world.Rooms, 83)
 	rooms := map[string]scripting.WorldRoom{}
 	for _, room := range world.Rooms {
 		rooms[room.Key] = room
@@ -29,6 +29,9 @@ func TestBundledWorldRoutes(t *testing.T) {
 		{"crypt_stair", []string{"west", "west", "down"}},
 		{"mine_lift", []string{"north", "east", "north", "north", "north", "north", "east", "down"}},
 		{"grotto_steps", []string{"north", "north", "east", "east", "down"}},
+		{"vault_stair", []string{"north", "east", "north", "east", "east", "east", "north", "east", "down"}},
+		{"wreck_steps", []string{"south", "south", "south", "south", "south", "east", "south", "south", "down"}},
+		{"frost_steps", []string{"north", "east", "north", "north", "north", "east", "east", "up", "north", "north", "east", "north", "down"}},
 		{"square", []string{"north", "north", "east", "east", "south", "west", "north", "north", "north"}},
 	} {
 		here := "square"
@@ -52,6 +55,9 @@ func TestDungeonPuzzles(t *testing.T) {
 		{"crypt", "Bellkeeper Reliquary", "answer", []string{"bell"}, 30},
 		{"mine", "Silvervein Pump Chamber", "crank", []string{"intake", "wheel", "sluice"}, 40},
 		{"grotto", "Tideglass Lens Chamber", "align", []string{"moon", "tide", "beacon"}, 50},
+		{"vault", "Tithe Strongroom", "press", []string{"grain", "coin", "seal"}, 45},
+		{"wreck", "Capstan Deck", "rig", []string{"anchor", "spar", "sail"}, 55},
+		{"frost", "Frozen Forge", "stoke", []string{"tinder", "bellows", "flue"}, 60},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			in := scripting.Input{Kind: "room", Source: scripts[tc.key], Hook: "on_command", Room: map[string]string{"name": tc.room}, Command: tc.command}

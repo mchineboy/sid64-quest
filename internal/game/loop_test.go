@@ -56,8 +56,8 @@ func TestPersistentPlayerLoop(t *testing.T) {
 	var characterID uuid.UUID
 	require.NoError(t, db.QueryRowContext(ctx, `
 		INSERT INTO characters (user_id, name, health, stamina, gold, current_room_id)
-		VALUES ($1, $2, 40, 40, 10, $3)
-		RETURNING id`, userID, "Tester "+userID.String()[:8], docksID).Scan(&characterID))
+		VALUES ($1, $2, 40, 40, $3, $4)
+		RETURNING id`, userID, "Tester "+userID.String()[:8], GoldValue(10), docksID).Scan(&characterID))
 
 	item, err := world.TakeItem(ctx, characterID, docksID, "manifest")
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestPersistentPlayerLoop(t *testing.T) {
 	message, character, err := world.GiveItem(ctx, characterID, squareID, "manifest", "crier")
 	require.NoError(t, err)
 	require.Contains(t, message, "gold")
-	require.Equal(t, int64(25), character.Gold)
+	require.Equal(t, GoldValue(25), character.Gold)
 	require.Equal(t, 1, character.Deliveries)
 	require.Empty(t, mustInventory(t, world, characterID))
 
@@ -110,7 +110,7 @@ func TestPersistentPlayerLoop(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, innID, *reloaded.CurrentRoomID)
 	require.Equal(t, 1, reloaded.Deliveries)
-	require.Equal(t, int64(25), reloaded.Gold)
+	require.Equal(t, GoldValue(25), reloaded.Gold)
 }
 
 func TestTakeDropEquipPersists(t *testing.T) {

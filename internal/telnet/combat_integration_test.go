@@ -7,6 +7,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/require"
+	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 )
 
 func TestCoreIntegrationCombatReplayAndDefeat(t *testing.T) {
@@ -42,14 +43,17 @@ func TestCoreIntegrationCombatReplayAndDefeat(t *testing.T) {
 	require.NoError(t, f.db.QueryRow(`SELECT health,stamina FROM characters WHERE id=$1`, character).Scan(&hp, &stamina))
 	require.Equal(t, 94, hp)
 	require.Equal(t, 93, stamina)
-	_, err = f.db.Exec(`UPDATE characters SET health=1 WHERE id=$1`, character)
+	_, err = f.db.Exec(`UPDATE characters SET health=1,gold=$2 WHERE id=$1`, character, game.GoldValue(100))
 	require.NoError(t, err)
 	resp = f.request(green, req, "input", "hit sentinel")
-	require.Contains(t, outputText(resp), "carried to the Prancing Pony Inn")
+	require.Contains(t, outputText(resp), "Hall of Returning")
 	var room string
-	require.NoError(t, f.db.QueryRow(`SELECT c.health,r.name FROM characters c JOIN rooms r ON r.id=c.current_room_id WHERE c.id=$1`, character).Scan(&hp, &room))
-	require.Equal(t, 1, hp)
-	require.Equal(t, "The Prancing Pony Inn", room)
-	require.Contains(t, outputText(f.request(green, req, "input", "rest")), "restored")
-	require.Contains(t, outputText(f.request(green, req, "input", "where")), "Prancing Pony")
+	var dead bool
+	require.NoError(t, f.db.QueryRow(`SELECT c.health,c.is_dead,r.name FROM characters c JOIN rooms r ON r.id=c.current_room_id WHERE c.id=$1`, character).Scan(&hp, &dead, &room))
+	require.Zero(t, hp)
+	require.True(t, dead)
+	require.Equal(t, "Hall of Returning", room)
+	require.Contains(t, outputText(f.request(green, req, "input", "west")), "You are dead")
+	require.Contains(t, outputText(f.request(green, req, "input", "resurrect pay")), "return with")
+	require.Contains(t, outputText(f.request(green, req, "input", "where")), "Hall of Returning")
 }

@@ -97,7 +97,7 @@ func TestScriptingLifecycle(t *testing.T) {
 	require.Equal(t, "visit 3", run())
 	var gold int
 	require.NoError(t, db.QueryRow(`SELECT gold FROM characters WHERE id=$1`, character).Scan(&gold))
-	require.Equal(t, 21, gold)
+	require.Equal(t, int(GoldValue(21)), gold)
 	// Concurrent commands must not lose increments or award from stale state.
 	var wg sync.WaitGroup
 	results := make(chan string, 4)

@@ -92,8 +92,12 @@ func (ws *WorldService) MoveCharacter(ctx context.Context, characterID uuid.UUID
 
 	var currentRoomID uuid.UUID
 	var stamina int
-	if err := tx.QueryRowContext(ctx, `SELECT current_room_id, stamina FROM characters WHERE id = $1 FOR UPDATE`, characterID).Scan(&currentRoomID, &stamina); err != nil {
+	var dead bool
+	if err := tx.QueryRowContext(ctx, `SELECT current_room_id, stamina, is_dead FROM characters WHERE id = $1 FOR UPDATE`, characterID).Scan(&currentRoomID, &stamina, &dead); err != nil {
 		return nil, nil, 0, fmt.Errorf("load character location: %w", err)
+	}
+	if dead {
+		return nil, nil, stamina, fmt.Errorf("the dead cannot leave the Hall of Returning; use resurrect or resurrect pay")
 	}
 
 	from, err := ws.getRoomTx(ctx, tx, currentRoomID)
@@ -127,7 +131,8 @@ func (ws *WorldService) LoadCharacter(ctx context.Context, characterID uuid.UUID
 	if err := ws.db.QueryRowContext(ctx, `
 		SELECT c.id, c.user_id, c.name, c.level, c.experience, c.health, c.max_health,
 		       c.stamina, c.max_stamina, c.gold, c.alignment_lawful, c.alignment_good,
-		       c.current_room_id, c.last_rest, c.is_sleeping, c.created_at,
+		       c.current_room_id, c.last_rest, c.is_sleeping, c.is_dead, c.died_at,
+		       c.resurrection_ready_at, c.death_room_id, c.created_at,
 		       COALESCE(o.deliveries, 0)
 		FROM characters c
 		LEFT JOIN character_objectives o ON o.character_id = c.id
@@ -135,7 +140,8 @@ func (ws *WorldService) LoadCharacter(ctx context.Context, characterID uuid.UUID
 		&char.ID, &char.UserID, &char.Name, &char.Level, &char.Experience,
 		&char.Health, &char.MaxHealth, &char.Stamina, &char.MaxStamina, &char.Gold,
 		&char.AlignmentLawful, &char.AlignmentGood, &currentRoomID, &char.LastRest,
-		&char.IsSleeping, &char.CreatedAt, &char.Deliveries,
+		&char.IsSleeping, &char.IsDead, &char.DiedAt, &char.ResurrectionAt,
+		&char.DeathRoomID, &char.CreatedAt, &char.Deliveries,
 	); err != nil {
 		return nil, fmt.Errorf("load character: %w", err)
 	}

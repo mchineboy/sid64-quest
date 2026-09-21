@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
 
@@ -96,7 +97,7 @@ func (c *Connection) petsciiRoom(npcs, items, others []string) string {
 func petsciiHelp() string {
 	return petHeading("Commands") + petLine(`LOOK / L       Room or LOOK <name>
 N S E W U D    Move
-ATTACK <name>  Fight NPC (2 stamina)
+ATTACK <name>  Fight; LOOT after victory
 WHERE          Location and exits
 TAKE <item|all> Pick up
 DROP <item>    Put down
@@ -105,6 +106,7 @@ EQUIP / UNEQUIP <item>
 TALK [name]    Speak to an NPC
 GIVE <item> [name]
 REST           Recover at the inn
+RESURRECT [PAY] Return from death
 SAY <message>  Talk to the room
 WHO            Online players
 ANNOUNCE <msg> Server message (admin)
@@ -130,7 +132,7 @@ func (c *Connection) petsciiInventory(items []*models.InventoryItem) string {
 		}
 		b += petLine(name)
 	}
-	return b + "\r" + petYellow + petLine(fmt.Sprintf("Gold: %d", c.Character.Gold)) + petWhite
+	return b + "\r" + petYellow + petLine("Coin: "+game.FormatCurrency(c.Character.Gold)) + petWhite
 }
 
 func (c *Connection) petsciiStats() string {
@@ -139,7 +141,7 @@ func (c *Connection) petsciiStats() string {
 	b += petLine(fmt.Sprintf("Level %d   XP %d", ch.Level, ch.Experience))
 	b += petGreen + petLine(fmt.Sprintf("Health:  %d/%d", ch.Health, ch.MaxHealth))
 	b += petLine(fmt.Sprintf("Stamina: %d/%d", ch.Stamina, ch.MaxStamina))
-	b += petYellow + petLine(fmt.Sprintf("Gold: %d", ch.Gold)) + petWhite
+	b += petYellow + petLine("Coin: "+game.FormatCurrency(ch.Gold)) + petWhite
 	lawful, good := "Neutral", "Neutral"
 	if ch.AlignmentLawful > 25 {
 		lawful = "Lawful"

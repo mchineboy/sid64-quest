@@ -90,9 +90,9 @@ func TestWorldContentUpgradeAndPersistence(t *testing.T) {
 	require.NoError(t, ws.EnsureStarterWorld(ctx))
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM rooms`).Scan(&count))
-	require.Equal(t, 41, count)
+	require.Equal(t, 83, count)
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM scripts`).Scan(&count))
-	require.Equal(t, 4, count)
+	require.Equal(t, 8, count)
 	var detached bool
 	require.NoError(t, db.QueryRow(`SELECT script_id IS NULL FROM rooms WHERE id=$1`, square).Scan(&detached))
 	require.True(t, detached)
@@ -107,7 +107,7 @@ func TestWorldContentUpgradeAndPersistence(t *testing.T) {
 	require.Zero(t, out.Gold)
 	saved, err = ws.LoadCharacter(ctx, character)
 	require.NoError(t, err)
-	require.Equal(t, int64(30), saved.Gold)
+	require.Equal(t, GoldValue(30), saved.Gold)
 	_, room, _, err = ws.MoveCharacter(ctx, character, "south")
 	require.NoError(t, err)
 	_, room, _, err = ws.MoveCharacter(ctx, character, "south")
@@ -117,18 +117,21 @@ func TestWorldContentUpgradeAndPersistence(t *testing.T) {
 	require.Equal(t, "Lantern Cemetery", room.Name)
 	// Simulate an older pack without the tower, with an operator occupying its
 	// proposed entrance. A failed extension must roll back every inserted room.
-	var tower, spring uuid.UUID
+	var tower, spring, crown uuid.UUID
 	require.NoError(t, db.QueryRow(`SELECT room_id FROM world_content_rooms WHERE content_key='tower'`).Scan(&tower))
 	require.NoError(t, db.QueryRow(`SELECT room_id FROM world_content_rooms WHERE content_key='spring'`).Scan(&spring))
+	require.NoError(t, db.QueryRow(`SELECT room_id FROM world_content_rooms WHERE content_key='highland_crown'`).Scan(&crown))
 	_, err = db.Exec(`DELETE FROM world_content_rooms WHERE content_key='tower'`)
 	require.NoError(t, err)
 	_, err = db.Exec(`DELETE FROM rooms WHERE id=$1`, tower)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE rooms SET exits=exits-'down' WHERE id=$1`, crown)
 	require.NoError(t, err)
 	_, err = db.Exec(`UPDATE rooms SET exits=exits || jsonb_build_object('east',$2::text) WHERE id=$1`, spring, finale)
 	require.NoError(t, err)
 	require.ErrorContains(t, ws.EnsureStarterWorld(ctx), "new content conflicts")
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM rooms`).Scan(&count))
-	require.Equal(t, 40, count)
+	require.Equal(t, 82, count)
 	_, err = db.Exec(`UPDATE rooms SET exits=exits-'east' WHERE id=$1`, spring)
 	require.NoError(t, err)
 	require.NoError(t, ws.EnsureStarterWorld(ctx))

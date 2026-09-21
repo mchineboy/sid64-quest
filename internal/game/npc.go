@@ -151,7 +151,7 @@ func (ws *WorldService) GiveItem(ctx context.Context, characterID, roomID uuid.U
 		return "", nil, fmt.Errorf("remove quest item: %w", err)
 	}
 
-	gold += questRewardGold
+	gold += GoldValue(questRewardGold)
 	stamina += 20
 	if stamina > maxStamina {
 		stamina = maxStamina

@@ -23,6 +23,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	"github.com/tylerhardison/race-condition-kingdom/internal/auth"
+	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 	rcmail "github.com/tylerhardison/race-condition-kingdom/internal/mail"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 	"golang.org/x/crypto/bcrypt"
@@ -254,7 +255,7 @@ func (h *Handler) createCharacter(ctx context.Context, id uuid.UUID, name string
 	if n >= maxCharacters {
 		return fmt.Errorf("character limit reached")
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO characters(user_id,name,gold,current_room_id) VALUES($1,$2,$3,(SELECT id FROM rooms WHERE name='Town Square' ORDER BY created_at LIMIT 1))`, id, name, h.cfg.Game.StartingGold)
+	_, err = tx.ExecContext(ctx, `INSERT INTO characters(user_id,name,gold,current_room_id) VALUES($1,$2,$3,(SELECT id FROM rooms WHERE name='Town Square' ORDER BY created_at LIMIT 1))`, id, name, game.GoldValue(h.cfg.Game.StartingGold))
 	if err != nil {
 		return err
 	}

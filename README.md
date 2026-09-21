@@ -30,13 +30,14 @@ See the [tester guide](docs/ALPHA-TESTERS.md) for things to try and useful bug-r
 
 ## Implemented gameplay
 
-- **41 persistent rooms authored in Starlark:** the original town, countryside trails, woodland, a coastal loop, and three six-room dungeons. Type `trails` in Town Square for routes.
+- **83 persistent rooms authored in Starlark:** the original town, six linked outland routes, and six scripted dungeons. Type `trails` in Town Square for routes.
 - **A shared world across both terminal ports:** ANSI and PETSCII players see one another, share room chat, and appear in the same online-player list.
 - **Persistent progress:** location, inventory, equipment, health, stamina, gold, and delivery progress are stored in PostgreSQL.
 - **Items and equipment:** take and drop items, drink potions, equip and unequip weapons or armor, and inspect your inventory.
 - **Bulk pickup:** `take all` and `get all` collect available stacks up to the 50-item pack limit. Duplicate quest items stay behind. Pickups are transactional and protected against concurrent players taking the same items.
 - **Scripted dungeons:** solve the Bellkeeper Crypt riddle, restore Silvervein Mine's pumps, and align the Tideglass Grotto lens. Each offers a one-time reward per character, with saved puzzle progress. These are shared exploration and puzzle areas with optional PvE encounters in their side chambers.
-- **PvE combat:** `attack <monster>` trades one round with a hostile NPC for two stamina. Weapons add damage, armor reduces counterattacks, and victories grant gold and experience. Six Starlark-defined dungeon creatures respawn after a delay. Retreat through any exit; defeat returns you to the inn with 1 HP and your belongings. Players and friendly NPCs cannot be attacked.
+- **PvE combat and rare loot:** `attack <monster>` trades one round for two stamina. Twelve dungeon creatures leave killer-owned corpses containing copper, silver, gold, and occasionally one of four armor tiers. Use `loot <monster>`.
+- **Recoverable death:** defeat moves you to the crypt's Hall of Returning without item loss. Pay 100 gold immediately with `resurrect pay`, or wait ten minutes and use `resurrect`.
 - **A repeatable objective:** return the misplaced harbor ledger from the docks to the Town Crier for a reward.
 - **Rest and recovery:** movement spends stamina; resting at the Prancing Pony Inn, Forester's Lodge, or Keeper's Cottage restores health and stamina.
 - **A little levity:** try taking the fountain, a lamppost, or other scenery. Actual portable items take precedence over scenery jokes.

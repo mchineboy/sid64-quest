@@ -18,6 +18,7 @@ import (
 )
 
 const MaxSource = 16384
+const MaxWorldSource = 32768
 const MaxState = 8192
 const MaxSteps = 50000
 
@@ -71,8 +72,12 @@ func init() {
 }
 
 func Run(ctx context.Context, in Input) (Output, error) {
-	if len(in.Source) > MaxSource {
-		return Output{}, fmt.Errorf("script exceeds %d bytes", MaxSource)
+	sourceLimit := MaxSource
+	if in.Kind == "world" {
+		sourceLimit = MaxWorldSource
+	}
+	if len(in.Source) > sourceLimit {
+		return Output{}, fmt.Errorf("script exceeds %d bytes", sourceLimit)
 	}
 	select {
 	case slots <- struct{}{}:
@@ -94,7 +99,7 @@ func Run(ctx context.Context, in Input) (Output, error) {
 		return Output{}, fmt.Errorf("script input too large")
 	}
 	cmd := exec.CommandContext(ctx, executable, "--rck-script-worker")
-	cmd.Env = []string{"GOMEMLIMIT=64MiB", "GOMAXPROCS=1", "GOTRACEBACK=none", "GORACE=atexit_sleep_ms=0"}
+	cmd.Env = []string{"GOMEMLIMIT=128MiB", "GOMAXPROCS=1", "GOTRACEBACK=none", "GORACE=atexit_sleep_ms=0"}
 	cmd.Dir = os.TempDir()
 	cmd.Stdin = bytes.NewReader(data)
 	var stdout boundedBuffer
@@ -135,7 +140,11 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 func evaluate(in Input) (Output, error) {
 	out := Output{State: make(map[string]string)}
-	if len(in.Source) > MaxSource {
+	sourceLimit := MaxSource
+	if in.Kind == "world" {
+		sourceLimit = MaxWorldSource
+	}
+	if len(in.Source) > sourceLimit {
 		return out, fmt.Errorf("source too large")
 	}
 	for k, v := range in.State {

@@ -28,7 +28,7 @@ link("a", "north", "a")`,
 		"controls": `room("a", "A\x1b", "Room A")`,
 		"path":     `room("a", "A", "Room A", script="../secret")`,
 		"limit": `def build():
-    for n in range(65):
+    for n in range(97):
         room("a"+str(n), "Room", "Description")
 build()`,
 		"effects": `award_gold(100)`,
@@ -60,6 +60,8 @@ func TestMonsterDefinitions(t *testing.T) {
 		`monster("m","a","Monster","Description",attack=-1)`,
 		`monster("m","a","Monster","Description",gold=101)`,
 		`monster("m","a","Monster","Description",respawn=0)`,
+		`monster("m","a","Monster","Description",loot="Warden Mail")`,
+		`monster("m","a","Monster","Description",loot="Warden Mail",drop=10001)`,
 		`monster("m","a","Monster","Description")
 monster("m","a","Monster","Description")`,
 	} {
@@ -69,7 +71,7 @@ monster("m","a","Monster","Description")`,
 	_, err := Run(context.Background(), Input{Kind: "world", Source: `room("a","A","Room A",kind="safe")
 monster("m","a","Monster","Description")`})
 	require.Error(t, err)
-	out, err := Run(context.Background(), Input{Kind: "world", Source: prefix + `monster("m","a","Monster","Description",health=30,gold=10)`})
+	out, err := Run(context.Background(), Input{Kind: "world", Source: prefix + `monster("m","a","Monster","Description",health=30,gold=10,loot="Warden Mail",drop=300)`})
 	require.NoError(t, err)
 	require.Len(t, out.World.Monsters, 1)
 	require.Equal(t, 30, out.World.Monsters[0].Health)

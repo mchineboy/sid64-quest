@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tylerhardison/race-condition-kingdom/internal/ansi"
+	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
 
@@ -311,6 +312,7 @@ AVAILABLE COMMANDS
   south, s             Move south when an exit exists
   east, e              Move east when an exit exists
   attack <monster>     Fight one round (2 stamina); leave by any exit to retreat
+  loot <monster>       Claim coin and possible rare armor from your kill
   west, w              Move west when an exit exists
   up, u / down, d      Climb or descend when an exit exists
   take, get <item|all> Pick up items
@@ -321,6 +323,7 @@ AVAILABLE COMMANDS
   talk [name]          Speak with someone here
   give <item> [name]   Hand an item to someone
   rest                 Recover health and stamina at an inn
+  resurrect [pay]      Return after ten minutes, or pay 100 gold immediately
   say <message>        Speak to everyone in the room
   announce <message>   Send a server-wide message (admin)
   where                Show your location and exits
@@ -400,8 +403,8 @@ func (c *Connection) SendInventory(items []*models.InventoryItem) error {
 			inventory += "  " + name + "\r\n"
 		}
 	}
-	inventory += fmt.Sprintf("Gold: %s\r\n",
-		c.Formatter.Colorize(fmt.Sprintf("%d", c.Character.Gold), ansi.ColorYellow))
+	inventory += fmt.Sprintf("Coin: %s\r\n",
+		c.Formatter.Colorize(game.FormatCurrency(c.Character.Gold), ansi.ColorYellow))
 
 	return c.SendMessage(inventory)
 }
@@ -454,8 +457,8 @@ func (c *Connection) SendStats() error {
 	}
 
 	stats.WriteString(fmt.Sprintf("Alignment: %s %s\r\n", lawfulText, goodText))
-	stats.WriteString(fmt.Sprintf("Gold: %s\r\n",
-		c.Formatter.Colorize(fmt.Sprintf("%d", c.Character.Gold), ansi.ColorYellow)))
+	stats.WriteString(fmt.Sprintf("Coin: %s\r\n",
+		c.Formatter.Colorize(game.FormatCurrency(c.Character.Gold), ansi.ColorYellow)))
 	if c.Character.Deliveries > 0 {
 		stats.WriteString(fmt.Sprintf("Harbor ledgers returned: %d\r\n", c.Character.Deliveries))
 	}
@@ -477,7 +480,7 @@ func (c *Connection) formatCharacterStatus() string {
 		fmt.Sprintf("SP: %d/%d", c.Character.Stamina, c.Character.MaxStamina),
 		ansi.GetStaminaColor(c.Character.Stamina, c.Character.MaxStamina))
 
-	gold := c.Formatter.Colorize(fmt.Sprintf("Gold: %d", c.Character.Gold), ansi.ColorYellow)
+	gold := c.Formatter.Colorize("Coin: "+game.FormatCurrency(c.Character.Gold), ansi.ColorYellow)
 
 	return fmt.Sprintf("[%s] [%s] [%s] Level %d %s",
 		health, stamina, gold, c.Character.Level, c.Character.Name)

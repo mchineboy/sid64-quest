@@ -16,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/models"
 )
@@ -567,7 +568,7 @@ func (as *AuthService) RegisterPlayer(username, email, password, characterName s
 		INSERT INTO characters (user_id, name, gold, current_room_id)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id, user_id, name, level, experience, health, max_health, stamina, max_stamina, gold, alignment_lawful, alignment_good, current_room_id, last_rest, is_sleeping, created_at`,
-		user.ID, characterName, as.config.Game.StartingGold, startingRoomID).Scan(
+		user.ID, characterName, game.GoldValue(as.config.Game.StartingGold), startingRoomID).Scan(
 		&character.ID, &character.UserID, &character.Name, &character.Level, &character.Experience,
 		&character.Health, &character.MaxHealth, &character.Stamina, &character.MaxStamina,
 		&character.Gold, &character.AlignmentLawful, &character.AlignmentGood, &character.CurrentRoomID,

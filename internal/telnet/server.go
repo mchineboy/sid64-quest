@@ -611,6 +611,13 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 	parts := strings.Fields(input)
 	command := strings.ToLower(parts[0])
 	args := parts[1:]
+	if conn.Character != nil && conn.Character.IsDead {
+		switch command {
+		case "quit", "q", "exit", "help", "h", "who", "say", "where", "look", "l", "stats", "st", "resurrect":
+		default:
+			return conn.SendError("You are dead. In the Hall of Returning, use resurrect or resurrect pay.")
+		}
+	}
 
 	// Handle basic commands
 	switch command {
@@ -656,6 +663,41 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 		return s.moveCharacter(conn, command)
 	case "attack", "hit", "kill":
 		return s.attackNPC(conn, strings.Join(args, " "))
+	case "loot":
+		if len(args) == 0 {
+			return conn.SendError("Loot which defeated monster?")
+		}
+		message, err := s.world.LootCorpse(conn.Context, conn.Character.ID, conn.Room.ID, strings.Join(args, " "))
+		if err != nil {
+			return conn.SendError(err.Error())
+		}
+		character, err := s.world.LoadCharacter(conn.Context, conn.Character.ID)
+		if err != nil {
+			return err
+		}
+		conn.Character = character
+		return conn.SendMessage(message)
+	case "resurrect":
+		pay := len(args) == 1 && strings.EqualFold(args[0], "pay")
+		if len(args) > 0 && !pay {
+			return conn.SendError("Usage: resurrect | resurrect pay")
+		}
+		result, err := s.world.Resurrect(conn.Context, conn.Character.ID, pay, s.config.Game.DeathPenalty)
+		if err != nil {
+			return conn.SendError(err.Error())
+		}
+		character, err := s.world.LoadCharacter(conn.Context, conn.Character.ID)
+		if err != nil {
+			return err
+		}
+		conn.Character = character
+		if err = conn.SendSuccess(result.Message); err != nil {
+			return err
+		}
+		if err = s.publish(events.NewEvent(events.EventPlayerRespawn).WithPlayer(character.ID).WithRoom(result.RoomID).Build()); err != nil {
+			s.logger.WithError(err).Warn("Failed to publish resurrection")
+		}
+		return nil
 	case "take", "get":
 		if len(args) == 0 {
 			conn.SendError("Take what?")
@@ -787,6 +829,10 @@ func (s *Server) sendLook(conn *Connection) error {
 	if err != nil {
 		return err
 	}
+	corpses, err := s.world.ListRoomCorpses(conn.Context, conn.Room.ID)
+	if err != nil {
+		return err
+	}
 
 	npcNames := make([]string, 0, len(npcs))
 	for _, npc := range npcs {
@@ -803,6 +849,13 @@ func (s *Server) sendLook(conn *Connection) error {
 		} else {
 			itemNames = append(itemNames, item.Name)
 		}
+	}
+	for _, corpse := range corpses {
+		label := "corpse of " + corpse.MonsterName
+		if corpse.OwnerID == conn.Character.ID {
+			label += " [yours; lootable]"
+		}
+		itemNames = append(itemNames, label)
 	}
 
 	others := make([]string, 0)

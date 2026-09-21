@@ -1,6 +1,6 @@
 # Authoring the world in Starlark
 
-The bundled world contains 41 rooms: the five original town rooms, 18 new overworld locations, and three six-room dungeons. All room descriptions, topology, puzzle clues, and dungeon behavior live in `internal/game/content/*.star`. Go supplies validation, transactional installation, movement, and the existing event APIs.
+The bundled world contains 83 rooms across the town, six outland routes, and six scripted dungeons. All room descriptions, topology, puzzle clues, and dungeon behavior live in `internal/game/content/*.star`. Go supplies validation, transactional installation, movement, loot, resurrection, and the event APIs.
 
 ## Playing
 
@@ -11,8 +11,11 @@ Type `trails` in Town Square to see directions. The original dock delivery route
 | Bellkeeper Crypt | west, west, down | Read the side chambers; `answer <word>` in the reliquary | 30 gold |
 | Silvervein Mine | north, east, north, north, north, north, east, down | Read the survey diagram; `crank <label>` at the pumps | 40 gold |
 | Tideglass Grotto | north, north, east, east, down | Read the shell archive; `align <symbol>` at the lens | 50 gold |
+| Tithe Vault | north, east, north, east, east, east, north, east, down | Read the ledger; `press <plate>` in the strongroom | 45 gold |
+| Tideworn Hulk | south, south, south, south, south, east, south, south, down | Read the galley table; `rig <pin>` at the capstan | 55 gold |
+| Frostfall Deep | north, east, north, north, north, east, east, up, north, north, east, north, down | Read the ice verse; `stoke <lever>` at the forge | 60 gold |
 
-Every passage has a return exit. Use `up`/`u` and `down`/`d` for stairs and the mine lift. Rest restores health and stamina at the Prancing Pony Inn, Forester's Lodge, or Keeper's Cottage. Dungeon rewards are once per character. Partial pump/lens progress survives reconnects and restarts; an incorrect valid control resets its sequence. These are shared dungeons with optional PvE encounters in side chambers, without instances or locked movement.
+Every passage has a return exit. Rest works at six inns and shelters. Dungeon rewards are once per character; sequence progress survives reconnects and restarts. These are shared dungeons with optional PvE encounters, without instances or locked movement.
 
 Use the [editor packages](../editors/README.md) for `.star` highlighting and world/monster snippets.
 
@@ -34,17 +37,17 @@ build()
 - Room kinds are `normal`, `safe`, `shop`, `inn`, and `dungeon`. Only `inn` grants ordinary rest. PvE combat is permitted in `normal` and `dungeon` rooms; all other room types prohibit it.
 - `script="cellar"` references `content/cellar.star`, an ordinary room-hook script using the [event API](SCRIPTING.md). It is validated before installation.
 
-Put loops inside functions, as in the shipped `build()` function. The interpreter permits no filesystem, network, imports, or database access. World scripts have the same 16 KiB source, 50,000-step, two-second execution and bounded worker-output limits as event scripts, plus caps of 64 rooms, 192 links, and 32 monsters per map. Validation rejects duplicate keys, unknown destinations, conflicting exits, self-links, and rooms unreachable from the first room. World-building functions are unavailable to runtime room/NPC/item hooks.
+Put loops inside functions, as in the shipped `build()` function. The interpreter permits no filesystem, network, imports, or database access. World sources allow 32 KiB; event scripts retain the 16 KiB limit. Both have a 50,000-step, two-second execution budget. Maps are capped at 96 rooms, 192 links, and 32 monsters. Validation rejects duplicate keys, unknown destinations, conflicting exits, self-links, and unreachable rooms.
 
 ## Installation and updates
 
-Rebuild and restart the game core (or standalone gateway) after changing bundled files. Startup applies migrations `005_world_content.sql` and `006_pve_combat.sql` and installs content under the existing world advisory lock and transaction. A failed build or installation leaves the world unchanged. No production deployment is performed by editing these files.
+Rebuild and restart the game core (or standalone gateway) after changing bundled files. Startup applies migrations through `007_loot_and_resurrection.sql` and installs content under the existing world advisory lock and transaction. A failed build or installation leaves the world unchanged.
 
 The installer adopts existing starter rooms by name, retaining their UUIDs, characters, items, and delivery progress. Stable content keys are then mapped to room UUIDs in `world_content_rooms`. Never rename an installed content key to change a room's title. On first adoption, bundled descriptions and direction slots are installed; unrelated exits and existing script attachments are retained.
 
 Existing content is seeded once. Subsequent startups preserve administrator edits, disabled scripts, detached hooks, room descriptions, exits, and player puzzle state. Adding new room keys installs the rooms and their connections, including entrances from existing rooms. If a new entrance would replace an occupied exit, installation fails instead of overwriting it. Removing or changing an existing declaration does not delete or rewrite live rooms: ship an explicit data migration for existing topology/description changes. Source edits apply automatically to fresh installations; updating an existing published script requires the normal admin edit/review/publish workflow. Keep script identity stable to preserve puzzle progress.
 
-Bundled hooks have deterministic UUIDs and no player owner. Admins can find `world_guide`, `world_crypt`, `world_mine`, and `world_grotto` with `script list`, and edit, test, publish, disable, or detach them normally. Initial installation is recorded in `script_audit`. Non-admin builders cannot edit these release-owned scripts.
+Bundled hooks have deterministic UUIDs and no player owner. Admins can find the eight `world_*` scripts with `script list`, and edit, test, publish, disable, or detach them normally. Initial installation is recorded in `script_audit`. Non-admin builders cannot edit these release-owned scripts.
 
 State is scoped to script, target room, and character. Each dungeon's puzzle and reward live in its finale room, so no shared cross-room state is needed. Reward and completion state commit together; simultaneous answers cannot claim the reward twice.
 
@@ -58,15 +61,16 @@ Declare hostile NPCs in `world.star` alongside the rooms:
 
 ```python
 monster("tunnel_rat", "mine_gallery", "Tunnel Rat", "A rat guards its nest.",
-        health=18, attack=4, defense=0, gold=5, experience=10, respawn=120)
+        health=18, attack=4, gold=5, experience=10, respawn=120,
+        loot="Reinforced Hide", drop=800)
 ```
 
-`monster(key, room, name, description, health=20, attack=5, defense=0, gold=0, experience=0, respawn=300)` uses stable monster keys. Bounds: health 1–1000, attack 1–100, defense 0–50, gold 0–100, experience 0–1000, and respawn 30–3600 seconds. Monsters must reference a normal or dungeon room. Duplicate keys, invalid rooms, control characters, and excessive stats are rejected before installation. Definitions cannot create player targets. Their deterministic NPC identities are seeded once; changing a live creature's stats requires a data migration. Startup preserves living injuries and pending respawns.
+`monster(...)` uses stable monster keys. Optional `loot` names an installed item and `drop` is its chance in basis points (800 = 8%). Both must be present together. Other bounds remain health 1–1000, attack 1–100, defense 0–50, gold 0–100, experience 0–1000, and respawn 30–3600 seconds.
 
-The six shipped opponents are Bronze Sentinel, Lantern Wraith, Tunnel Rat, Quartz Golem, Glassback Crab, and Storm Eel. Use `look <name>` to inspect a creature and `attack <name>` (aliases `hit` and `kill`) to fight. Commands are case-insensitive; ambiguous names must be clarified. All encounters are opt-in: nothing attacks on entry, while idle, or after retreat. Leaving uses ordinary movement and is always possible, even with no stamina. Injured monsters retain their health when players leave.
+Twelve opponents are shipped, two per dungeon. Use `attack <name>` to fight and `loot <name>` after landing the killing blow. All encounters are opt-in; injured monsters retain health when players leave.
 
 Each successful attack spends 2 stamina. Damage is `max(1, 5 + equipped weapon damage - monster defense)`. A surviving creature retaliates for `max(1, monster attack - equipped armor defense)`. Actual damage cannot exceed remaining health. Only the strongest equipped bonus of each type counts, bounded to 100 weapon damage and 50 armor defense. Killing blows receive no counterattack. Equipment in the pack has no combat effect.
 
-The player landing the killing blow receives the creature's gold and experience. Experience is stored and shown in `stats`; automatic leveling is not yet implemented. Dead monsters disappear and return at full health after their configured delay, when the room is next observed or attacked. Rewards are repeatable per respawn. Concurrent attacks serialize, and rewards and damage share the terminal command transaction, including replay protection in the persistent core.
+The killing blow grants experience and creates a killer-owned corpse for 30 minutes. Every corpse contains gold plus non-zero silver and copper. It may also contain Reinforced Hide (8%), Warden Mail (3%), Runed Plate (1%), or Crownward Aegis (0.25%), depending on the monster. Coin uses one copper-unit balance: 100 copper = 1 silver and 100 silver = 1 gold. Looting is transactional and cannot be duplicated by concurrent commands.
 
-Defeat returns the player to the Prancing Pony Inn with 1 HP and unchanged gold, inventory, and experience. Use `rest` to recover. There is no permanent death or item loss. The monster keeps the damage it received that round. Players, friendly NPCs, and remote targets cannot be damaged, including in legacy rooms labeled `pvp`.
+Death is not permanent and does not remove items, coin, or experience. The dead move to the Hall of Returning at 0 HP and cannot leave or use ordinary gameplay commands. `resurrect pay` spends 100 gold immediately; otherwise `resurrect` succeeds after ten real minutes. Resurrection restores half health and full stamina. The monster keeps the damage it dealt that round.

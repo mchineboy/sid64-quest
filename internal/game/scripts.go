@@ -276,7 +276,7 @@ func (ws *WorldService) RunScript(ctx context.Context, character, room, target u
 		return scripting.Output{}, fmt.Errorf("script %s: %w", id, err)
 	}
 	if out.Gold != 0 || out.Heal != 0 {
-		if _, err = tx.ExecContext(ctx, `UPDATE characters SET gold=gold+$2,health=LEAST(max_health,health+$3) WHERE id=$1`, character, out.Gold, out.Heal); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE characters SET gold=gold+$2,health=LEAST(max_health,health+$3) WHERE id=$1`, character, GoldValue(out.Gold), out.Heal); err != nil {
 			return scripting.Output{}, err
 		}
 	}
