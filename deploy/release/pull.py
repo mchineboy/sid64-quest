@@ -59,6 +59,15 @@ def resolve_commit(version):
     return commit
 
 
+def ready_release(releases, minimum):
+    stable = [r for r in releases if not r['draft'] and not r['prerelease'] and VERSION.fullmatch(r['tag_name'])]
+    for release in sorted(stable, key=lambda r: version_tuple(r['tag_name']), reverse=True):
+        asset = candidate(release, minimum)
+        if asset:
+            return release, asset
+    return None
+
+
 def download(asset, path):
     request = urllib.request.Request(asset['browser_download_url'], headers={'User-Agent': 'sid64-release-agent'})
     digest, total = hashlib.sha256(), 0
@@ -73,12 +82,14 @@ def download(asset, path):
 
 def main():
     os.umask(0o077)
-    release = get_json('/releases/latest')
-    version = release['tag_name']
     minimum = (INSTALLED / 'min-version').read_text().strip()
-    asset = candidate(release, minimum)
-    if asset is None:
+    # A newer release still building must not hide a ready release whose Actions
+    # job holds production concurrency while waiting for this agent.
+    ready = ready_release(get_json('/releases?per_page=20'), minimum)
+    if ready is None:
         return
+    release, asset = ready
+    version = release['tag_name']
     previous = json.loads(STATUS.read_text()) if STATUS.exists() else {}
     if previous.get('version') and version_tuple(previous['version']) >= version_tuple(version):
         return  # Completed/failed/interrupted attempts require a newer version or operator repair.

@@ -42,6 +42,14 @@ class PullTests(unittest.TestCase):
         with patch.object(pull, 'get_json', side_effect=[{'object': {'type': 'commit', 'sha': 'a' * 40}}, {'status': 'ahead'}]):
             self.assertEqual(pull.resolve_commit('v0.1.1'), 'a' * 40)
 
+    def test_newer_build_does_not_hide_ready_release(self):
+        ready = self.release()
+        pending = {**self.release(), 'tag_name': 'v0.1.2', 'assets': []}
+        prerelease = {**self.release(), 'tag_name': 'v0.2.0', 'prerelease': True}
+        chosen, _ = pull.ready_release([pending, prerelease, ready], 'v0.1.1')
+        self.assertEqual(chosen['tag_name'], 'v0.1.1')
+        self.assertIsNone(pull.ready_release([pending, prerelease], 'v0.1.1'))
+
     def test_status_never_exposes_extra_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'state.json'
