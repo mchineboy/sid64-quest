@@ -21,19 +21,24 @@ and a production dependency vulnerability scan. It builds six Linux ARM64
 binaries with the Go version in `go.mod` and attaches a reproducible tarball
 and SHA-256 checksum to the release. Do not edit, move, or reuse a published tag.
 
-No Actions runner is installed on modeburner or the public proxy. The final job
-uses the `production` environment's `RELEASE_SSH_KEY` secret and
-`RELEASE_KNOWN_HOSTS` variable to reach a forced command on `loop.seraphnet.com`.
-The proxy forwards the archive over Tailscale to a second forced command on the
-Pi. Both keys prohibit shells, PTYs, agent forwarding, and port forwarding.
-The CI key still authorizes production application replacement; restrict
-repository write access accordingly. Personal SSH keys and production `.env`
-values are never uploaded to GitHub.
+No Actions runner is installed on modeburner or the public proxy. A fixed-function
+systemd pull agent on modeburner checks GitHub every two minutes over outbound
+HTTPS. Once the tested release artifacts are attached, it verifies GitHub's asset
+digest, the tagged commit's ancestry on `main`, and the package manifest before
+calling the deployment receiver. It needs no GitHub token, SSH key, or new inbound
+port. Repository writers can authorize production application replacement by
+publishing a release; restrict write access accordingly.
+
+GitHub waits for `https://sid64.quest/deployment-status.json` to report completion
+for the exact version and commit. This read-only endpoint exposes only version,
+commit, status and timestamp. It uses the existing HTTPS/Tailscale route to a
+loopback status service; production secrets and logs are never returned.
 
 ## Deployment behavior
 
 The root-owned `/usr/local/lib/rck-release/receive.py` runs as the existing
-deployment account. It accepts only `verify` or `deploy` and an archive on stdin.
+deployment account, called locally by the pull agent. It accepts only `verify`
+or `deploy` via its fixed command environment and an archive on stdin.
 It rejects unexpected paths, symlinks, duplicate entries, oversized payloads,
 wrong-architecture binaries, checksum mismatches, changed applied migrations,
 version downgrades, and reused versions with different contents. A host lock and
@@ -85,19 +90,36 @@ cat releases/v0.1.0/deployment.json
 docker compose exec -T edge cat /control/target
 ```
 
-## Installed SSH path
+## Installed services
 
-- Proxy: root-owned `/usr/local/bin/rck-release-forward`; restricted CI public
-  key in `/home/admin/.ssh/authorized_keys`. A separate private key and pinned Pi
-  host key live in `rck-production` and `rck-production-known-hosts` in that directory.
-- Pi: restricted proxy public key in the deployment account's `authorized_keys`;
-  receiver and approved `Dockerfile`/`Caddyfile` in `/usr/local/lib/rck-release/`.
-- GitHub: the `production` environment permits only `v*` tags, has the dedicated
-  CI secret, and requires no second approval after publishing a release. Tag
-  rules prevent updates/deletions of `v*` tags.
+- `/usr/local/lib/rck-release/` contains root-owned `pull.py`, `receive.py`,
+  `status.py`, approved `Dockerfile`/`Caddyfile`, and `min-version` (`v0.1.1`).
+  The bootstrap floor excludes `v0.1.0`, whose SSH deployment was blocked by AWS
+  ingress rules before any production change. Tags remain immutable.
+- `rck-release-pull.timer` checks every two minutes; `rck-release-pull.service`
+  runs under the existing deployment user with a 35-minute timeout. Its journal
+  contains deployment logs. No downloaded repository script is executed.
+- `rck-release-status.service` binds only `127.0.0.1:8091`. Tailscale Serve adds
+  `/deployment-status.json` on the existing port 8443. Existing auth and tracker
+  routes remain intact. This service does not accept deployment requests.
+- `/srv/rck/release-status.json` is the public-safe result of the latest attempted
+  release. A failed/interrupted attempt is not retried automatically; inspect its
+  logs and state, then publish a newer corrective version or repair deliberately.
+- GitHub's `production` environment permits only `v*` tags and requires no second
+  approval after publishing. Tag rules prevent updates/deletions of `v*` tags.
+  It contains no production deployment credentials.
 
-To rotate credentials, provision a fresh pair at each hop, replace the matching
-restricted public key and GitHub environment secret, verify host pins, and remove
-the old keys. Preserve the forced-command restrictions. Receiver/forwarder
-updates are operator installations from this repository, followed by `verify`
-with a newly packaged release before deployment.
+Inspect or pause automation:
+
+```sh
+sudo systemctl status rck-release-pull.timer rck-release-status.service
+sudo journalctl -u rck-release-pull.service --since today
+sudo systemctl stop rck-release-pull.timer
+```
+
+Stopping the timer does not interrupt a deployment already running. Restore it
+with `sudo systemctl start rck-release-pull.timer`. Agent, receiver, route and
+service changes are deliberate operator installations from this repository.
+After an interrupted deployment, verify the actual stack before clearing or
+archiving its attempt records. Do not assume an old status timestamp means the
+release succeeded.

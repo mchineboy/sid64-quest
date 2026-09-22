@@ -1,0 +1,16 @@
+[Unit]
+Description=Read-only SID64 Quest release status
+After=network.target
+
+[Service]
+User=tyler.hardison
+ExecStart=/usr/bin/python3 /usr/local/lib/rck-release/status.py
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+[Install]
+WantedBy=multi-user.target

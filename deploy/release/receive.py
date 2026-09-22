@@ -225,7 +225,8 @@ def main():
     require(command in ('verify', 'deploy'), 'Only verify and deploy are supported')
     # Bound slow/malformed uploads as well as lock waits; no inherited client env.
     os.environ.clear()
-    os.environ.update(PATH='/usr/local/bin:/usr/bin:/bin', HOME=str(Path.home()), COMPOSE_PROJECT_NAME='rck')
+    os.environ.update(PATH='/usr/local/bin:/usr/bin:/bin', HOME=str(Path.home()), COMPOSE_PROJECT_NAME='rck',
+                      DOCKER_CONFIG=str(ROOT / '.release-docker'))
     import signal
     signal.alarm(1800)
     with (ROOT / '.release.lock').open('a') as lock:

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for a tested production release every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+AccuracySec=10s
+Unit=rck-release-pull.service
+
+[Install]
+WantedBy=timers.target

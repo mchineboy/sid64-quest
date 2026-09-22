@@ -48,22 +48,26 @@ jobs:
           else
             gh release upload "$VERSION" rck-linux-arm64.tar.gz rck-linux-arm64.tar.gz.sha256
           fi
-      - name: Deploy through restricted SSH receiver
-        env:
-          RELEASE_SSH_KEY: ${{ secrets.RELEASE_SSH_KEY }}
-          RELEASE_KNOWN_HOSTS: ${{ vars.RELEASE_KNOWN_HOSTS }}
+      - name: Wait for modeburner's outbound release agent
         run: |
-          umask 077
-          mkdir -p "$RUNNER_TEMP/rck-ssh"
-          trap 'rm -rf "$RUNNER_TEMP/rck-ssh"' EXIT
-          printf '%s\n' "$RELEASE_SSH_KEY" > "$RUNNER_TEMP/rck-ssh/key"
-          printf '%s\n' "$RELEASE_KNOWN_HOSTS" > "$RUNNER_TEMP/rck-ssh/known_hosts"
-          unset RELEASE_SSH_KEY
-          ssh -T -i "$RUNNER_TEMP/rck-ssh/key" \
-            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$RUNNER_TEMP/rck-ssh/known_hosts" \
-            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-            admin@loop.seraphnet.com deploy < release/rck-linux-arm64.tar.gz
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          deadline = time.monotonic() + 1800
+          while time.monotonic() < deadline:
+              with urllib.request.urlopen('https://sid64.quest/deployment-status.json', timeout=20) as response:
+                  state = json.load(response)
+              if state.get('version') == os.environ['VERSION']:
+                  if state.get('commit') != os.environ['GITHUB_SHA']:
+                      raise SystemExit('Deployment commit does not match release')
+                  if state.get('status') == 'failed':
+                      raise SystemExit('Production deployment failed; inspect the host release record')
+                  if state.get('status') == 'complete':
+                      print('Modeburner confirmed successful deployment')
+                      break
+              time.sleep(15)
+          else:
+              raise SystemExit('Timed out waiting for production deployment')
+          PY
       - name: Check public endpoints
         run: |
           curl --fail --silent --show-error --retry 3 --max-time 20 https://sid64.quest/ready >/dev/null
