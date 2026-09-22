@@ -26,13 +26,13 @@ jobs:
           POSTGRES_DB: race_condition_kingdom
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U mud_user -d race_condition_kingdom'
+          --health-cmd "pg_isready -U mud_user -d race_condition_kingdom"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
         ports: ['6379:6379']
         options: >-
-          --health-cmd 'redis-cli ping'
+          --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       POSTGRES_HOST: 127.0.0.1
