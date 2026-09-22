@@ -262,7 +262,7 @@ func (c *Connection) SendCharacterList(characters []*models.Character) error {
 
 		rows[i] = []string{
 			fmt.Sprintf("%d", i+1),
-			char.Name,
+			terminalLabel(char.Name),
 			fmt.Sprintf("%d", char.Level),
 			healthColored,
 			location,
@@ -357,7 +357,7 @@ func (c *Connection) SendWhoList(players []OnlinePlayer) error {
 	whoList += strings.Repeat("-", 50) + "\r\n"
 
 	for _, player := range players {
-		whoList += fmt.Sprintf("%-20s %-10d %s\r\n", player.Name, player.Level, player.Location)
+		whoList += fmt.Sprintf("%-20s %-10d %s\r\n", terminalLabel(player.Name), player.Level, player.Location)
 	}
 
 	whoList += fmt.Sprintf("\r\nTotal: %d player(s) online", len(players))
@@ -423,7 +423,7 @@ func (c *Connection) SendStats() error {
 
 	// Basic info
 	stats.WriteString(fmt.Sprintf("Name: %s\r\n",
-		c.Formatter.Colorize(c.Character.Name, ansi.UIPrompt)))
+		c.Formatter.Colorize(terminalLabel(c.Character.Name), ansi.UIPrompt)))
 	stats.WriteString(fmt.Sprintf("Level: %d\r\n", c.Character.Level))
 	stats.WriteString(fmt.Sprintf("Experience: %d\r\n", c.Character.Experience))
 	stats.WriteString("\r\n")
@@ -483,7 +483,7 @@ func (c *Connection) formatCharacterStatus() string {
 	gold := c.Formatter.Colorize("Coin: "+game.FormatCurrency(c.Character.Gold), ansi.ColorYellow)
 
 	return fmt.Sprintf("[%s] [%s] [%s] Level %d %s",
-		health, stamina, gold, c.Character.Level, c.Character.Name)
+		health, stamina, gold, c.Character.Level, terminalLabel(c.Character.Name))
 }
 
 // formatRoomDescription formats the current room description
@@ -527,7 +527,7 @@ func (c *Connection) formatPrompt() string {
 		return "> "
 	}
 
-	prompt := fmt.Sprintf("[%s]> ", c.Character.Name)
+	prompt := fmt.Sprintf("[%s]> ", terminalLabel(c.Character.Name))
 	return c.Formatter.Colorize(prompt, ansi.UIPrompt)
 }
 

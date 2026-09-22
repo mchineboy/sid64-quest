@@ -175,7 +175,7 @@ func TestAuthService_LinkTokenToSession(t *testing.T) {
 	require.NoError(t, err)
 	userID := uuid.New()
 	characterID := uuid.New()
-	require.NoError(t, authService.LinkTokenToSession(token, "connection-123", userID, characterID))
+	require.NoError(t, authService.LinkTokenToSession(token, "connection-123", userID, characterID, 1))
 
 	session, err := authService.GetSession("connection-123")
 	require.NoError(t, err)
@@ -282,6 +282,6 @@ func TestPairingChallengeCannotBeReplayed(t *testing.T) {
 	service := newTestAuthService(t, cfg)
 	token, _, err := service.GenerateAuthChallenge("replay-test")
 	require.NoError(t, err)
-	require.NoError(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New()))
-	require.Error(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New()))
+	require.NoError(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New(), 1))
+	require.Error(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New(), 1))
 }

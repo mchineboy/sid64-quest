@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"github.com/tylerhardison/race-condition-kingdom/internal/auth"
 	"github.com/tylerhardison/race-condition-kingdom/internal/database"
 	"github.com/tylerhardison/race-condition-kingdom/internal/game"
 	"github.com/tylerhardison/race-condition-kingdom/pkg/config"
@@ -60,11 +62,12 @@ func TestInGameScriptingWorkflow(t *testing.T) {
 	}()
 	c, collect := drainedConnection(t)
 	c.State = StateInGame
+	c.Session = &models.Session{UserID: owner, AuthVersion: 1}
 	// Real authenticated connections identify their owner through Character.
 	c.User = nil
 	c.Character = &models.Character{ID: character, UserID: owner, Name: "Editor"}
 	c.Room = &models.Room{ID: room, Name: "Editor room"}
-	s := &Server{world: game.NewWorldService(db), hub: newPlayerHub()}
+	s := &Server{authService: auth.NewAuthService(db, nil, cfg, logrus.New()), world: game.NewWorldService(db), hub: newPlayerHub()}
 	command := func(input string) { require.NoError(t, s.processInput(c, input)) }
 	command("script new room puzzle")
 	var id uuid.UUID

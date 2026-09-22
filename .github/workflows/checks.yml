@@ -1,0 +1,100 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: mud_user
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: race_condition_kingdom
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U mud_user -d race_condition_kingdom'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd 'redis-cli ping'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: mud_user
+      POSTGRES_PASSWORD: ci-only-password
+      POSTGRES_DB: race_condition_kingdom
+      POSTGRES_SSL_MODE: disable
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: '6379'
+      RCK_CORE_INTEGRATION: '1'
+      RCK_INTEGRATION_BIN_DIR: ${{ github.workspace }}/build/integration
+      GOTOOLCHAIN: local
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify tagged commit is on main
+        if: inputs.version != ''
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$(git rev-parse "refs/tags/$VERSION^{commit}")" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Initialize disposable test database
+        env:
+          PGPASSWORD: ci-only-password
+        run: |
+          for migration in internal/database/migrations/*.sql; do
+            psql -h 127.0.0.1 -U mud_user -d race_condition_kingdom -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
+          done
+      - name: Build process-restart test binaries
+        run: |
+          mkdir -p build/integration
+          go build -o build/integration/ ./cmd/game-core ./cmd/terminal-edge ./cmd/core-switch
+      - name: Tests, race detector, and vet
+        run: |
+          python3 -m unittest discover -s deploy/release -p 'test_*.py' -v
+          go test -race -p 1 -count=1 ./...
+          go vet ./...
+      - name: Check production dependency vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          CGO_ENABLED=0 govulncheck ./...
+      - name: Package immutable release
+        if: inputs.version != ''
+        env:
+          VERSION: ${{ inputs.version }}
+        run: python3 deploy/release/package.py "$VERSION" build/rck-linux-arm64.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.version != ''
+        with:
+          name: production-arm64
+          path: |
+            build/rck-linux-arm64.tar.gz
+            build/rck-linux-arm64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30

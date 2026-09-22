@@ -115,6 +115,7 @@ Operational work completed:
 - Daily PostgreSQL backups on the Pi, scheduled checksum-verified copies to the operator's Mac, and successful disposable-database restore rehearsals.
 - Pinned ARM64 releases, persistent terminal sockets, and blue/green core switching with retained rollback images.
 - Operator account listing, disable/enable, and password-reset commands.
+- `rck-admin top`: live terminal sessions, characters, login states, terminal modes, rooms, and heartbeat age. See the [operator runbook](docs/ALPHA-RUNBOOK.md#live-terminal-dashboard) for the Pi command.
 
 The deployed world is separate from local development data. Production uses a
 persistent terminal edge: core restarts and blue/green switches preserve

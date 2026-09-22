@@ -1,0 +1,71 @@
+name: Production release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    if: github.event.release.prerelease == false && startsWith(github.event.release.tag_name, 'v')
+    uses: ./.github/workflows/checks.yml
+    with:
+      version: ${{ github.event.release.tag_name }}
+
+  deploy:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: production
+      url: https://sid64.quest
+    permissions:
+      contents: write # Attach the tested package to this release.
+    env:
+      VERSION: ${{ github.event.release.tag_name }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-arm64
+          path: release
+      - name: Verify artifact and preserve release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          sha256sum -c rck-linux-arm64.tar.gz.sha256
+          # Existing assets must match; never overwrite an immutable release.
+          mkdir existing
+          if gh release download "$VERSION" -p rck-linux-arm64.tar.gz.sha256 -D existing; then
+            cmp rck-linux-arm64.tar.gz.sha256 existing/rck-linux-arm64.tar.gz.sha256
+          else
+            gh release upload "$VERSION" rck-linux-arm64.tar.gz rck-linux-arm64.tar.gz.sha256
+          fi
+      - name: Deploy through restricted SSH receiver
+        env:
+          RELEASE_SSH_KEY: ${{ secrets.RELEASE_SSH_KEY }}
+          RELEASE_KNOWN_HOSTS: ${{ vars.RELEASE_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/rck-ssh"
+          trap 'rm -rf "$RUNNER_TEMP/rck-ssh"' EXIT
+          printf '%s\n' "$RELEASE_SSH_KEY" > "$RUNNER_TEMP/rck-ssh/key"
+          printf '%s\n' "$RELEASE_KNOWN_HOSTS" > "$RUNNER_TEMP/rck-ssh/known_hosts"
+          unset RELEASE_SSH_KEY
+          ssh -T -i "$RUNNER_TEMP/rck-ssh/key" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/rck-ssh/known_hosts" \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            admin@loop.seraphnet.com deploy < release/rck-linux-arm64.tar.gz
+      - name: Check public endpoints
+        run: |
+          curl --fail --silent --show-error --retry 3 --max-time 20 https://sid64.quest/ready >/dev/null
+          curl --fail --silent --show-error --retry 3 --max-time 20 https://sid64.quest/login >/dev/null
+          printf 'Deployed **%s** from %s to https://sid64.quest\n' "$VERSION" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

@@ -85,7 +85,7 @@ func TestTerminalOverrideDuringLogin(t *testing.T) {
 func TestInvalidTerminalDoesNotChangeState(t *testing.T) {
 	conn, collect := drainedConnection(t)
 	conn.State = StateAuthenticated
-	if err := (&Server{}).processInput(conn, "terminal invalid"); err != nil {
+	if err := (&Server{}).handleTerminalCommand(conn, []string{"invalid"}); err != nil {
 		t.Fatal(err)
 	}
 	if conn.State != StateAuthenticated || conn.Presentation != PresentationANSI {

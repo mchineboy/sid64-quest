@@ -229,7 +229,7 @@ func (as *AuthService) MarkTokenUsed(token string) error {
 // AuthenticateUser authenticates a user with username and password
 func (as *AuthService) AuthenticateUser(username, password string) (*models.User, error) {
 	query := `
-		SELECT id, username, email, password_hash, created_at, last_login, is_active, permissions
+		SELECT id, username, email, password_hash, created_at, last_login, is_active, permissions, auth_version
 		FROM users 
 		WHERE username = $1 AND is_active = true
 	`
@@ -247,6 +247,7 @@ func (as *AuthService) AuthenticateUser(username, password string) (*models.User
 		&lastLogin,
 		&user.IsActive,
 		&permissionsJSON,
+		&user.AuthVersion,
 	)
 
 	if err != nil {
@@ -289,11 +290,15 @@ func (as *AuthService) AuthenticateUser(username, password string) (*models.User
 }
 
 // CreateSession creates a new session for an authenticated user
-func (as *AuthService) CreateSession(userID uuid.UUID, characterID uuid.UUID, connectionID string) (*models.Session, error) {
+func (as *AuthService) CreateSession(userID uuid.UUID, characterID uuid.UUID, connectionID string, authVersion int64) (*models.Session, error) {
+	if authVersion < 1 {
+		return nil, fmt.Errorf("credential version required")
+	}
 	sessionID := uuid.New().String()
 
 	session := models.Session{
 		ID:           sessionID,
+		AuthVersion:  authVersion,
 		CharacterID:  characterID,
 		UserID:       userID,
 		ConnectionID: connectionID,
@@ -365,7 +370,10 @@ func (as *AuthService) UpdateSessionActivity(sessionID string) error {
 }
 
 // LinkTokenToSession links an authentication token to a session after successful auth
-func (as *AuthService) LinkTokenToSession(token, sessionID string, userID, characterID uuid.UUID) error {
+func (as *AuthService) LinkTokenToSession(token, sessionID string, userID, characterID uuid.UUID, authVersion int64) error {
+	if authVersion < 1 {
+		return fmt.Errorf("credential version required")
+	}
 	// Consume the challenge and attach identity atomically. A replay or a
 	// disconnected terminal must never authenticate another session.
 	const script = `
@@ -374,11 +382,11 @@ func (as *AuthService) LinkTokenToSession(token, sessionID string, userID, chara
  local challenge=cjson.decode(raw); local session=cjson.decode(current);
  if challenge.used or challenge.session_id~=ARGV[1] then return 0 end;
  challenge.used=true; session.user_id=ARGV[2]; session.character_id=ARGV[3];
- session.auth_token=ARGV[4]; session.last_activity=ARGV[5];
+ session.auth_version=tonumber(ARGV[7]); session.auth_token=ARGV[4]; session.last_activity=ARGV[5];
  local ttl=redis.call('PTTL',KEYS[1]); if ttl<=0 then return 0 end;
  redis.call('SET',KEYS[1],cjson.encode(challenge),'PX',ttl);
  redis.call('SET',KEYS[2],cjson.encode(session),'EX',ARGV[6]); return 1;`
-	n, err := as.redis.Eval(context.Background(), script, []string{"auth_token:" + token, "session:" + sessionID}, sessionID, userID.String(), characterID.String(), token, time.Now().Format(time.RFC3339Nano), int(as.config.Auth.SessionExpiry.Seconds())).Int()
+	n, err := as.redis.Eval(context.Background(), script, []string{"auth_token:" + token, "session:" + sessionID}, sessionID, userID.String(), characterID.String(), token, time.Now().Format(time.RFC3339Nano), int(as.config.Auth.SessionExpiry.Seconds()), authVersion).Int()
 	if err != nil {
 		return err
 	}
@@ -517,18 +525,18 @@ func (as *AuthService) CreateUser(username, email, password string) (*models.Use
 // playable starter world immediately.
 func (as *AuthService) RegisterPlayer(username, email, password, characterName string) (*models.User, *models.Character, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
-	email = strings.TrimSpace(email)
+	email = strings.ToLower(strings.TrimSpace(email))
 	characterName = strings.TrimSpace(characterName)
 	if len(username) < 3 || len(username) > 20 {
 		return nil, nil, fmt.Errorf("username must be between 3 and 20 characters")
 	}
-	if len(characterName) < 3 || len(characterName) > 30 {
+	if !ValidCharacterName(characterName) {
 		return nil, nil, fmt.Errorf("character name must be between 3 and 30 characters")
 	}
-	if !strings.Contains(email, "@") {
+	if !ValidEmail(email) {
 		return nil, nil, fmt.Errorf("a valid email address is required")
 	}
-	if len(password) < 8 {
+	if len(password) < 8 || len(password) > 72 {
 		return nil, nil, fmt.Errorf("password must be at least 8 characters")
 	}
 
@@ -550,7 +558,7 @@ func (as *AuthService) RegisterPlayer(username, email, password, characterName s
 	defer func() { _ = tx.Rollback() }()
 
 	permissions, _ := json.Marshal(map[string]bool{"player": true})
-	user := &models.User{Username: username, Email: email, IsActive: true, Permissions: map[string]interface{}{"player": true}}
+	user := &models.User{AuthVersion: 1, Username: username, Email: email, IsActive: true, Permissions: map[string]interface{}{"player": true}}
 	if err := tx.QueryRow(`
 		INSERT INTO users (username, email, password_hash, permissions)
 		VALUES ($1, $2, $3, $4)
@@ -639,4 +647,21 @@ func (as *AuthService) UserActive(ctx context.Context, id uuid.UUID) (bool, erro
 	}
 	err := row.Scan(&active)
 	return active, err
+}
+
+// SessionActive rejects old checkpoints and credentials revoked since pairing.
+func (as *AuthService) SessionActive(ctx context.Context, s *models.Session) (bool, error) {
+	if s == nil || s.UserID == uuid.Nil || s.AuthVersion < 1 {
+		return false, nil
+	}
+	var valid bool
+	const query = `SELECT is_active AND auth_version=$2 FROM users WHERE id=$1`
+	var row *sql.Row
+	if as.readTx != nil {
+		row = as.readTx.QueryRowContext(ctx, query+` FOR SHARE`, s.UserID, s.AuthVersion)
+	} else {
+		row = as.db.QueryRowContext(ctx, query, s.UserID, s.AuthVersion)
+	}
+	err := row.Scan(&valid)
+	return valid, err
 }

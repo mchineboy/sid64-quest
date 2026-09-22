@@ -5,6 +5,39 @@ Deployment: `/srv/rck`, using `compose.edge.yml`. One persistent edge owns both
 terminal listeners; interchangeable blue/green cores share durable sessions.
 See [connection-preserving core deployments](BLUE-GREEN-DEPLOYMENTS.md).
 
+## Security release — 2026-09-22
+
+Auth, edge, both core slots, and the operator binary now use
+`rck:security-20260922-d9721f1`; **core-blue is active**. This release was built
+with Go 1.26.8 from the reviewed working tree based on
+`d9721f1d5459a94b931ee3a3039e0be12d327983`, including uncommitted security fixes
+and existing operator changes. It is not a clean-commit release. Docker image:
+`sha256:833b8b9a3371a7ff79c87db603785694985d4c6bab93c7bf8728025e174a7435`.
+Artifacts, binary checksums, manifest, prior Compose files, protected prior
+environment, and prior target/operator links are preserved under
+`/srv/rck/releases/security-20260922-d9721f1/`.
+
+Migration 008 adds credential revocation. Public Caddy supplies authenticated
+client-IP assertions using a distinct protected secret shared with auth.
+Direct account access bypassing Caddy now returns 403; internal health probes
+remain available. Both old cores were replaced, and the legacy gateway remains
+stopped. Returning to an older binary would reintroduce the fixed vulnerabilities.
+
+Pre-release backup `20260922T154502Z.dump` and post-release backup
+`20260922T155406Z.dump` passed disposable restore checks and were copied to local
+`backups/pi/` with verified SHA-256 checksums. The latter contains eight migrations,
+83 rooms and four characters. All services are healthy. Public signup, both
+terminal modes, idle-session revocation on password change/recovery, sibling
+recovery invalidation, and separate client quotas with spoofed-header rejection
+passed. The two disposable accounts and their scoped session data were removed;
+the four original accounts/characters remain. No recovery email was sent.
+
+Redis now enforces `maxmemory 268435456` and `maxmemory-policy noeviction`.
+The Pi kernel lacks Docker memory-limit support, so the separate 512 MiB
+container limit is not enforced. See [security remediation](SECURITY-REMEDIATION.md)
+for source verification and remaining boundaries. The following records describe
+earlier deployments; their active-slot/image statements are historical.
+
 Production migrated on 2026-09-08 at 16:45 Pacific from clean `main` revision
 `6d0e7d08543ef6d9c1f837a840d77ca48530b8bc`, image `rck:6d0e7d0`.
 The terminal check immediately before cutover found zero established connections.
@@ -41,6 +74,10 @@ Public ANSI: `sid64.quest:2323`; public PETSCII: `sid64.quest:6464`.
 The private `symptom-pi` endpoints remain available for operator diagnostics over the tailnet. The existing symptom tracker retains ports 80/443 and 3000. MUD HTTP is loopback port 8081; databases have no published host ports.
 
 ## Deploy and inspect
+
+For normal application releases, follow [tagged production releases](RELEASING.md):
+publish a stable GitHub Release and let Actions build, test, and deploy it. The
+commands below remain useful for infrastructure work and incident recovery.
 
 Build from clean, pushed `main`. Source the local development environment and run
 `make test-core-restart`, `go test -race -count=1 ./...`, and `go vet ./...`.
@@ -96,6 +133,58 @@ presence can be inspected without a login (leases may lag disconnects):
 ```sh
 docker compose exec -T postgres psql -X -U mud_user -d race_condition_kingdom -c "SELECT checkpoint->>'Username' AS username, checkpoint->'Character'->>'name' AS character, last_seen FROM terminal_sessions WHERE NOT closed AND last_seen > now()-interval '2 minutes' ORDER BY last_seen DESC"
 ```
+
+## Live terminal dashboard
+
+The independently deployed admin utility runs in a temporary container using
+Compose's auth environment/network, without restarting any running service:
+
+```sh
+ssh -t tyler.hardison@symptom-pi 'cd /srv/rck && ./rck-admin top'
+```
+
+On the Pi, use `./rck-admin top --interval 5s` to refresh less often, or
+`./rck-admin top --once` for a full snapshot. Redirected output automatically
+uses a single snapshot. Ctrl-C exits and restores the terminal. The live view
+fits as many rows as the terminal height permits; `--once` prints every row.
+
+The view shows active session/player totals, username, character, login state,
+ANSI/PETSCII mode, room and heartbeat age. Wide terminals also show an abbreviated
+session ID. Heartbeats include automatic polls and **are not player idle time**.
+Closed sessions are excluded; lost connections can remain visible until the
+two-minute presence window expires. Connection duration, last-input time and
+source IP are not currently recorded for this view. Query failures replace the
+display with an error and retry, rather than displaying stale data as current.
+
+The command selects only display fields from checkpoints, never authentication
+tokens, pairing codes or pending player output. It performs no database writes.
+Keep this operator command on the Pi; it uses the existing privileged database
+credentials from the deployment environment.
+
+For an admin-only release, cross-compile `./cmd/rck-admin` with
+`CGO_ENABLED=0 GOOS=linux GOARCH=arm64`, verify its checksum after upload, and
+place it in a versioned `/srv/rck/admin/RELEASE/rck-admin` directory. Install
+`deploy/pi/rck-admin.sh` as `/srv/rck/rck-admin`, then atomically point
+`/srv/rck/admin/current` at the release directory. The wrapper bind-mounts this
+binary into a temporary auth-image container. Existing service image pins and
+containers are untouched. To roll back, repoint `admin/current` at a prior
+release. This admin-only path requires no schema migration or game deployment.
+The older `/app/rck-admin` inside service images remains the bundled version;
+use the wrapper to access the independently released command.
+
+### Admin dashboard release — 2026-09-21
+
+Deployed independently at `/srv/rck/admin/top-20260921-3ed2b9e4`, with `current`
+pointing to that directory and `/srv/rck/rck-admin` as the launcher. The release
+contains the source snapshot and SHA256 checksums. Binary SHA256:
+`3ed2b9e41a6f89957a822f7808054f5d29645869770c90d07171debbf56b28f2`.
+
+The full race-enabled suite (including the admin database test), `go vet`, and
+core process-restart integration tests passed against isolated local databases.
+Production checks confirmed ANSI/PETSCII connections appear with the correct
+mode and username-entry state, disappear after disconnect, and the SSH live view
+refreshes and restores the terminal on Ctrl-C. All four app service container IDs
+remained unchanged; no application image pins, migrations or data were changed.
 
 ## Accounts
 

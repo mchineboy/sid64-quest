@@ -72,14 +72,17 @@ func start(t *testing.T, h *Handler, path string) (*http.Cookie, *session) {
 	return c, s
 }
 func TestAnonymousFormsAndCSRF(t *testing.T) {
-	h, cache, _ := testHandler(t, nil)
+	h, _, _ := testHandler(t, nil)
 	require.Equal(t, 303, request(h, "GET", "/account", nil, nil).Code)
 	c, s := start(t, h, "/signup")
 	require.True(t, c.HttpOnly)
 	require.Equal(t, http.SameSiteLaxMode, c.SameSite)
 	w := request(h, "POST", "/signup", url.Values{"csrf": {"wrong"}}, c)
 	require.Equal(t, 403, w.Code)
-	cache.FastForward(sessionTTL + time.Second)
+	parts := strings.Split(c.Value, ".")
+	parts[1] = "1"
+	payload := strings.Join(parts[:3], ".")
+	c.Value = payload + "." + h.anonymousMAC(payload)
 	require.Equal(t, 403, request(h, "POST", "/signup", url.Values{"csrf": {s.CSRF}}, c).Code)
 	require.Equal(t, 405, request(h, "DELETE", "/login", nil, nil).Code)
 	require.Equal(t, 200, request(h, "GET", "/account/style.css", nil, nil).Code)
@@ -149,8 +152,9 @@ func TestAccountJourneyAndOwnership(t *testing.T) {
 	require.Equal(t, 303, w.Code, w.Body.String())
 	authenticated := w.Result().Cookies()[0]
 	require.NotEqual(t, cookie.Value, authenticated.Value)
-	// Login rotated and removed the anonymous session.
-	require.Equal(t, 403, request(h, "POST", "/signup", form, cookie).Code)
+	// Login replaces the anonymous cookie with an authenticated session.
+	// Replaying a still-valid anonymous form cannot create the same account twice.
+	require.Equal(t, 422, request(h, "POST", "/signup", form, cookie).Code)
 	r := httptest.NewRequest("GET", "/account", nil)
 	r.AddCookie(authenticated)
 	s, e = h.readSession(r)

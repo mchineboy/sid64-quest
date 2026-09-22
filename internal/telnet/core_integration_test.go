@@ -119,7 +119,7 @@ func (f *coreFixture) login(core *Core, name string, user, character uuid.UUID) 
 	require.NoError(f.t, f.db.QueryRow(`SELECT checkpoint FROM terminal_sessions WHERE id=$1`, req.ID).Scan(&data))
 	var saved checkpoint
 	require.NoError(f.t, json.Unmarshal(data, &saved))
-	require.NoError(f.t, core.auth.LinkTokenToSession(saved.AuthToken, req.ID, user, character))
+	require.NoError(f.t, core.auth.LinkTokenToSession(saved.AuthToken, req.ID, user, character, 1))
 	f.request(core, req, "poll", "")
 	resp := f.request(core, req, "input", "1")
 	require.Contains(f.t, outputText(resp), "Town Square")
@@ -242,7 +242,7 @@ func TestCoreIntegrationRollbackAndOwnership(t *testing.T) {
 	require.NoError(t, f.db.QueryRow(`SELECT checkpoint FROM terminal_sessions WHERE id=$1`, other.ID).Scan(&raw))
 	var p checkpoint
 	require.NoError(t, json.Unmarshal(raw, &p))
-	require.NoError(t, green.auth.LinkTokenToSession(p.AuthToken, other.ID, u, ch))
+	require.NoError(t, green.auth.LinkTokenToSession(p.AuthToken, other.ID, u, ch, 1))
 	f.request(green, other, "poll", "")
 	require.Contains(t, outputText(f.request(green, other, "input", "1")), "already online")
 	// Reject the checkpoint write after movement. The character update must roll

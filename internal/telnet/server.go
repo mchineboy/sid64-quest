@@ -322,8 +322,14 @@ func (s *Server) connectionLoop(conn *Connection) {
 		case <-conn.Context.Done():
 			return
 		case <-authTicker.C:
+			if err := s.checkSession(conn); err != nil {
+				return
+			}
 			if conn.State == StateAwaitingAuth {
 				if err := s.checkAuthentication(conn, false); err != nil {
+					if errors.Is(err, errQuit) {
+						return
+					}
 					s.logger.WithError(err).Error("Error polling authentication")
 					if conn.SendError("An error occurred checking authentication.") != nil {
 						return
@@ -362,12 +368,8 @@ func (s *Server) connectionLoop(conn *Connection) {
 // processInput processes input based on the connection state
 func (s *Server) processInput(conn *Connection, input string) error {
 	defer s.hub.update(conn)
-	if conn.State == StateInGame && conn.Session != nil {
-		active, err := s.authService.UserActive(conn.Context, conn.Session.UserID)
-		if err != nil || !active {
-			conn.SendMessage("Your session has ended. Please reconnect.")
-			return errQuit
-		}
+	if err := s.checkSession(conn); err != nil {
+		return err
 	}
 
 	if conn.State == StateInGame && conn.ScriptEditor != nil {
@@ -500,6 +502,10 @@ func (s *Server) checkAuthentication(conn *Connection, notifyPending bool) error
 		return nil
 	}
 
+	active, err := s.authService.SessionActive(conn.Context, session)
+	if err != nil || !active {
+		return errQuit
+	}
 	// Authentication complete!
 	conn.Session = session
 	conn.State = StateAuthenticated
@@ -571,7 +577,7 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 	s.hub.update(conn)
 
 	// Publish player connect event
-	event := events.PlayerConnectEvent(conn.Character.ID, conn.Character.Name)
+	event := events.PlayerConnectEvent(conn.Character.ID, terminalLabel(conn.Character.Name))
 	if err := s.publish(event); err != nil {
 		s.logger.WithError(err).Warn("Failed to publish player connect event")
 	}
@@ -585,7 +591,7 @@ func (s *Server) handleCharacterSelection(conn *Connection, input string) error 
 	if _, err := s.runScriptHook(conn, "room", conn.Room.ID, "on_enter", "login", ""); err != nil {
 		return err
 	}
-	s.BroadcastMessage(conn.Character.Name + " has entered the realm.")
+	s.BroadcastMessage(terminalLabel(conn.Character.Name) + " has entered the realm.")
 	return conn.SendPrompt(conn.formatPrompt())
 }
 
@@ -642,7 +648,7 @@ func (s *Server) handleGameCommandWithoutPrompt(conn *Connection, input string) 
 	case "say":
 		if len(args) > 0 {
 			message := strings.Join(args, " ")
-			s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s says: %s", conn.Character.Name, message))
+			s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s says: %s", terminalLabel(conn.Character.Name), message))
 			_, err := s.runScriptHook(conn, "room", conn.Room.ID, "on_say", command, message)
 			return err
 		} else {
@@ -803,7 +809,7 @@ func (s *Server) moveCharacter(conn *Connection, direction string) error {
 	}
 	direction = game.NormalizeDirection(direction)
 
-	s.broadcastToRoom(from.ID, fmt.Sprintf("%s leaves %s.", conn.Character.Name, direction))
+	s.broadcastToRoom(from.ID, fmt.Sprintf("%s leaves %s.", terminalLabel(conn.Character.Name), direction))
 	conn.Character.CurrentRoomID = &to.ID
 	conn.Character.Stamina = stamina
 	conn.Room = to
@@ -811,7 +817,7 @@ func (s *Server) moveCharacter(conn *Connection, direction string) error {
 	if err := s.sendLook(conn); err != nil {
 		return err
 	}
-	s.broadcastToRoom(to.ID, fmt.Sprintf("%s arrives.", conn.Character.Name))
+	s.broadcastToRoom(to.ID, fmt.Sprintf("%s arrives.", terminalLabel(conn.Character.Name)))
 
 	if err := s.publish(events.PlayerMoveEvent(conn.Character.ID, from.ID, to.ID, direction)); err != nil {
 		s.logger.WithError(err).Warn("Failed to publish player movement event")
@@ -861,7 +867,7 @@ func (s *Server) sendLook(conn *Connection) error {
 	others := make([]string, 0)
 	for _, other := range s.hub.snapshots() {
 		if other.conn.ID != conn.ID && other.roomID == conn.Room.ID {
-			others = append(others, other.player.Name)
+			others = append(others, terminalLabel(other.player.Name))
 		}
 	}
 	sort.Strings(others)
@@ -933,7 +939,7 @@ func (s *Server) takeItem(conn *Connection, query string) error {
 			if item.Quantity > 1 {
 				name = fmt.Sprintf("%s x%d", name, item.Quantity)
 			}
-			s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s takes %s.", conn.Character.Name, name))
+			s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s takes %s.", terminalLabel(conn.Character.Name), name))
 		}
 		remaining, err := s.world.ListRoomItems(conn.Context, conn.Room.ID)
 		if err != nil {
@@ -956,7 +962,7 @@ func (s *Server) takeItem(conn *Connection, query string) error {
 		conn.SendError(err.Error())
 		return nil
 	}
-	s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s takes %s.", conn.Character.Name, item.Name))
+	s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s takes %s.", terminalLabel(conn.Character.Name), item.Name))
 	return nil
 }
 
@@ -966,7 +972,7 @@ func (s *Server) dropItem(conn *Connection, query string) error {
 		conn.SendError(err.Error())
 		return nil
 	}
-	s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s drops %s.", conn.Character.Name, item.Name))
+	s.broadcastToRoom(conn.Room.ID, fmt.Sprintf("%s drops %s.", terminalLabel(conn.Character.Name), item.Name))
 	return nil
 }
 
@@ -1133,6 +1139,23 @@ func (s *Server) handleTerminalCommand(conn *Connection, args []string) error {
 			return err
 		}
 		return conn.SendPrompt(conn.formatPrompt())
+	}
+	return nil
+}
+
+// checkSession also runs on idle polls, so a stolen terminal cannot retain access.
+func (s *Server) checkSession(conn *Connection) error {
+	if conn.State != StateInGame && conn.State != StateAuthenticated {
+		return nil
+	}
+	// Missing sessions and pre-upgrade checkpoints fail closed.
+	if conn.Session == nil {
+		return errQuit
+	}
+	active, err := s.authService.SessionActive(conn.Context, conn.Session)
+	if err != nil || !active {
+		_ = conn.SendMessage("Your session has ended. Please reconnect.")
+		return errQuit
 	}
 	return nil
 }

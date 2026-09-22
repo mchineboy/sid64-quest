@@ -39,7 +39,7 @@ func (h *playerHub) update(c *Connection) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.players[c.ID] = playerSnapshot{conn: c, characterID: c.Character.ID, roomID: c.Room.ID, player: OnlinePlayer{Name: c.Character.Name, Level: c.Character.Level, Location: c.Room.Name}, petscii: c.Presentation == PresentationPETSCII}
+	h.players[c.ID] = playerSnapshot{conn: c, characterID: c.Character.ID, roomID: c.Room.ID, player: OnlinePlayer{Name: terminalLabel(c.Character.Name), Level: c.Character.Level, Location: c.Room.Name}, petscii: c.Presentation == PresentationPETSCII}
 }
 func (h *playerHub) remove(connID string) {
 	if h == nil {

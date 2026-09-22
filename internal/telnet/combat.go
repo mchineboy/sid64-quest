@@ -28,8 +28,8 @@ func (s *Server) attackNPC(conn *Connection, query string) error {
 	}
 	conn.Room = room
 	s.hub.update(conn)
-	s.broadcastToRoom(from, fmt.Sprintf("%s falls. Crypt wardens bear the body away.", character.Name))
-	s.broadcastToRoom(room.ID, fmt.Sprintf("Wardens carry %s into the Hall of Returning.", character.Name))
+	s.broadcastToRoom(from, fmt.Sprintf("%s falls. Crypt wardens bear the body away.", terminalLabel(character.Name)))
+	s.broadcastToRoom(room.ID, fmt.Sprintf("Wardens carry %s into the Hall of Returning.", terminalLabel(character.Name)))
 	if err = s.publish(events.PlayerMoveEvent(character.ID, from, room.ID, "defeat")); err != nil {
 		s.logger.WithError(err).Warn("Failed to publish death movement")
 	}

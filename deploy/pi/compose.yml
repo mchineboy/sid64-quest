@@ -29,10 +29,11 @@ services:
       retries: 10
   redis:
     image: redis:7-alpine
+    mem_limit: 512m
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
-    command: [sh, -c, 'exec redis-server --appendonly yes --appendfsync everysec --requirepass "$$REDIS_PASSWORD"']
+    command: [sh, -c, 'exec redis-server --appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
     volumes: [redis_data:/data]
     healthcheck:
       test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
@@ -41,6 +42,9 @@ services:
       retries: 10
   auth:
     <<: *app
+    environment:
+      AUTH_PROXY_TOKEN: ${AUTH_PROXY_TOKEN:?configure the public proxy shared secret}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?required}
     command: [/app/auth-service]
     ports: ["127.0.0.1:8081:8080"]
     healthcheck:

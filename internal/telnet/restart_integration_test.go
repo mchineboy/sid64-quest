@@ -159,7 +159,7 @@ func TestCoreIntegrationProcessRestart(t *testing.T) {
 			}
 			return json.Unmarshal(data, &saved) == nil && saved.AuthToken != ""
 		}, 10*time.Second, 25*time.Millisecond)
-		require.NoError(t, f.core.auth.LinkTokenToSession(saved.AuthToken, id, user, character))
+		require.NoError(t, f.core.auth.LinkTokenToSession(saved.AuthToken, id, user, character, 1))
 		client.until("character")
 		client.send("1\r")
 		client.until("Town Square")

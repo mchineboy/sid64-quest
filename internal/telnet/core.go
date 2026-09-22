@@ -208,6 +208,14 @@ func (c *Core) dispatch(ctx context.Context, req terminalwire.Request) (terminal
 	defer server.cancel()
 	for _, other := range sessions {
 		other.restore(ctx)
+		if !other.saved.Closed && (other.conn.State == StateInGame || other.conn.State == StateAuthenticated) {
+			if err := server.checkSession(other.conn); err != nil {
+				other.saved.Output = nil
+				other.saved.Closed = true
+				other.dirty = true
+				_ = other.conn.SendMessage("Your session has ended. Please reconnect.")
+			}
+		}
 		if other == s {
 			continue
 		}
@@ -297,7 +305,7 @@ func (c *Core) dispatch(ctx context.Context, req terminalwire.Request) (terminal
 	// nil legacy event bus does not deliver these for a stateless core.
 	if !wasClosed && s.saved.Closed && wasPlaying {
 		server.hub.remove(s.id)
-		server.BroadcastMessage(s.conn.Character.Name + " has left the realm.")
+		server.BroadcastMessage(terminalLabel(s.conn.Character.Name) + " has left the realm.")
 	}
 	if fresh && !s.saved.Closed && s.conn.State == StateInGame {
 		if err = s.observeRoom(world, req.Kind == "poll"); err != nil {

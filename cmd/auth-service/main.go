@@ -69,6 +69,12 @@ func main() {
 
 	// Load configuration
 	cfg := config.LoadFromEnv()
+	if cfg.Auth.ProxyToken != "" && (len(cfg.Auth.ProxyToken) < 32 || len(cfg.Auth.SecretKey) < 32) {
+		logger.Fatal("Proxy deployments require distinct AUTH_PROXY_TOKEN and AUTH_SECRET_KEY values of at least 32 characters")
+	}
+	if cfg.Auth.ProxyToken != "" && cfg.Auth.ProxyToken == cfg.Auth.SecretKey {
+		logger.Fatal("AUTH_PROXY_TOKEN must differ from AUTH_SECRET_KEY")
+	}
 
 	// Initialize database
 	db, err := database.New(cfg, logger)
@@ -229,13 +235,16 @@ func (h *AuthHandler) handleRegisterSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if h.loginLimited(w, r, data.Username) {
+		return
+	}
 	user, character, err := h.authService.RegisterPlayer(data.Username, data.Email, r.FormValue("password"), data.CharacterName)
 	if err != nil {
 		data.Error = "Could not create that account. " + err.Error()
 		h.renderRegisterPage(w, data)
 		return
 	}
-	if err := h.authService.LinkTokenToSession(data.Token, sessionID, user.ID, character.ID); err != nil {
+	if err := h.authService.LinkTokenToSession(data.Token, sessionID, user.ID, character.ID, user.AuthVersion); err != nil {
 		h.logger.WithError(err).Error("Failed to link registered user to session")
 		http.Error(w, "Authentication linking failed", http.StatusInternalServerError)
 		return
@@ -306,6 +315,10 @@ func (h *AuthHandler) handleAuthSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Apply the same per-account limits as browser login.
+	if h.loginLimited(w, r, username) {
+		return
+	}
 	// Authenticate user
 	user, err := h.authService.AuthenticateUser(username, password)
 	if err != nil {
@@ -340,7 +353,7 @@ func (h *AuthHandler) handleAuthSubmit(w http.ResponseWriter, r *http.Request) {
 	character := characters[0]
 
 	// Link token to session
-	if err := h.authService.LinkTokenToSession(token, sessionID, user.ID, character.ID); err != nil {
+	if err := h.authService.LinkTokenToSession(token, sessionID, user.ID, character.ID, user.AuthVersion); err != nil {
 		h.logger.WithError(err).Error("Failed to link token to session")
 		http.Error(w, "Authentication linking failed", http.StatusInternalServerError)
 		return
@@ -397,6 +410,9 @@ func (h *AuthHandler) handleAPIAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.loginLimited(w, r, req.Username) {
+		return
+	}
 	// Authenticate user
 	user, err := h.authService.AuthenticateUser(req.Username, req.Password)
 	if err != nil {
@@ -438,7 +454,7 @@ func (h *AuthHandler) handleAPIAuth(w http.ResponseWriter, r *http.Request) {
 	character := characters[0]
 
 	// Link token to session
-	if err := h.authService.LinkTokenToSession(token, sessionID, user.ID, character.ID); err != nil {
+	if err := h.authService.LinkTokenToSession(token, sessionID, user.ID, character.ID, user.AuthVersion); err != nil {
 		response := AuthResponse{
 			Success: false,
 			Message: "Authentication linking failed",
@@ -531,7 +547,7 @@ func (h *AuthHandler) loadTemplates() error {
         <div class="info">
             New here? <a href="/register?token={{.Token}}">Create an account and character.</a><br>
  <a href="/account">Manage your account and characters</a><br>
-            Local development account: admin / admin123
+
         </div>
     </div>
 </body>
@@ -648,4 +664,18 @@ func (h *AuthHandler) loadTemplates() error {
 
 	h.templates = templates
 	return nil
+}
+
+func (h *AuthHandler) loginLimited(w http.ResponseWriter, r *http.Request, username string) bool {
+	limited, err := h.authService.LimitLogin(r, username)
+	if err != nil {
+		http.Error(w, "Authentication temporarily unavailable", 503)
+		return true
+	}
+	if limited {
+		w.Header().Set("Retry-After", "900")
+		http.Error(w, "Too many attempts; try again later", 429)
+		return true
+	}
+	return false
 }

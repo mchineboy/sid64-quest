@@ -23,10 +23,10 @@ var pages = template.Must(template.New("account").Parse(markup))
 
 type page struct {
 	Mode, Title, CSRF, Error, Notice, Username, Email, CharacterName, Host, Identity, Token string
-	User                                                                                     *user
-	Characters                                                                               []character
-	Count, Limit, TelnetPort, PETSCIIPort                                                    int
-	MailEnabled, TokenOK                                                                     bool
+	User                                                                                    *user
+	Characters                                                                              []character
+	Count, Limit, TelnetPort, PETSCIIPort                                                   int
+	MailEnabled, TokenOK                                                                    bool
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +260,7 @@ func (h *Handler) handleForgot(w http.ResponseWriter, r *http.Request, p *page) 
 		}
 		return false
 	}
-	raw, err := h.createResetToken(r.Context(), u.ID)
+	raw, err := h.createResetToken(r.Context(), u)
 	if err != nil {
 		if h.logger != nil {
 			h.logger.WithError(err).Error("Password reset token create failed")
@@ -293,13 +293,13 @@ func (h *Handler) handleReset(w http.ResponseWriter, r *http.Request, p *page) b
 		p.Error = "The passwords don't match."
 		return false
 	}
-	userID, err := h.consumeResetToken(r.Context(), p.Token)
+	grant, err := h.consumeResetToken(r.Context(), p.Token)
 	if err != nil {
 		p.TokenOK = false
 		p.Error = "This reset link is invalid or has expired."
 		return false
 	}
-	u, err := h.loadUser(r.Context(), userID)
+	u, err := h.loadUser(r.Context(), grant.UserID)
 	if err != nil {
 		p.Error = "This reset link is invalid or has expired."
 		return false
@@ -309,7 +309,7 @@ func (h *Handler) handleReset(w http.ResponseWriter, r *http.Request, p *page) b
 		p.Error = "Could not change your password."
 		return false
 	}
-	result, err := h.db.ExecContext(r.Context(), `UPDATE users SET password_hash=$1 WHERE id=$2 AND is_active=true`, hash, u.ID)
+	result, err := h.db.ExecContext(r.Context(), `UPDATE users SET password_hash=$1 WHERE id=$2 AND is_active=true AND auth_version=$3`, hash, u.ID, grant.AuthVersion)
 	if err != nil {
 		p.Error = "Could not change your password."
 		return false
@@ -367,7 +367,7 @@ func (h *Handler) change(w http.ResponseWriter, r *http.Request, u *user, p *pag
 			return false
 		}
 	case "email", "password":
-		limited, e := h.limited(r)
+		limited, e := h.auth.LimitLogin(r, u.Username)
 		if e != nil {
 			p.Error = "Account service unavailable."
 			return false
@@ -382,7 +382,7 @@ func (h *Handler) change(w http.ResponseWriter, r *http.Request, u *user, p *pag
 		}
 		var err error
 		if action == "email" {
-			email := strings.TrimSpace(r.FormValue("email"))
+			email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 			if !validEmail(email) {
 				p.Error = "Enter a valid email address."
 				return false

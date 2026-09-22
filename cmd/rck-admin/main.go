@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const usage = "usage: rck-admin stats | list | disable USER | enable USER | reset-password USER (new password on stdin) | grant-builder USER | revoke-builder USER | grant-admin USER | revoke-admin USER"
+const usage = "usage: rck-admin top [--once] [--interval 2s] | stats | list | disable USER | enable USER | reset-password USER (new password on stdin) | grant-builder USER | revoke-builder USER | grant-admin USER | revoke-admin USER"
 
 func run() error {
 	if len(os.Args) < 2 {
@@ -26,6 +26,9 @@ func run() error {
 		return err
 	}
 	defer db.Close()
+	if os.Args[1] == "top" {
+		return runTop(db, os.Args[2:])
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if os.Args[1] == "stats" {

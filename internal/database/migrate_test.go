@@ -38,7 +38,7 @@ func TestMigrationsFreshAndRepeat(t *testing.T) {
 		}
 	}
 	var count int
-	if err = fresh.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil || count != 7 {
+	if err = fresh.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil || count != 8 {
 		t.Fatalf("migrations: %d, %v", count, err)
 	}
 	if err = fresh.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil || count != 0 {

@@ -15,7 +15,7 @@ Activation sequence:
 7. Change only AUTH_BASE_URL on the Pi to https://sid64.quest; restart its auth and gateway services. Test generated pairing links and QR scans from outside Tailscale.
 8. Exercise both terminal modes from an external network, then check reboot recovery of gateway services.
 
-Public terminals are plaintext on the client-to-EC2 segment, including game chat. Passwords stay in the HTTPS browser flow. The EC2-to-Pi segment uses Tailscale. The current application sees shared proxy source addresses: review HTTP rate limits for concurrent testers before increasing the group size. No PROXY protocol is sent to the existing terminal server.
+Public terminals are plaintext on the client-to-EC2 segment, including game chat. Passwords stay in the HTTPS browser flow. The EC2-to-Pi segment uses Tailscale. HTTP client identity now uses authenticated proxy assertions as described below. No PROXY protocol is sent to the existing terminal server.
 
 Public traffic and availability still depend on the Pi and its home connection. Resolve its observed SD-card stalls before relying on the service. Monitor EC2 transfer usage and public IPv4 charges in AWS.
 
@@ -24,6 +24,24 @@ Public-port verification: after the EC2 security-group update, direct connection
 ## Public endpoint activation — 2026-09-08
 
 `sid64.quest` resolves to EC2 at `52.34.32.84`. Caddy is enabled with public HTTPS; HAProxy forwards ports 2323 and 6464 to the Pi. AUTH_BASE_URL is now `https://sid64.quest`. Public users and QR-scanning phones no longer need Tailscale. Earlier private-only instructions describe the previous deployment. The existing Pi ts.net routes are preserved.
+
+## Authenticated HTTP proxy — 2026-09-22
+
+Caddy overwrites `X-RCK-Client-IP` with the connecting client's address and
+`X-RCK-Proxy-Token` with `AUTH_PROXY_TOKEN`. The shared credential lives in
+root-only `/etc/caddy/rck-proxy.env` (mode 0600) and the Pi's protected `.env`.
+The systemd drop-in `/etc/systemd/system/caddy.service.d/rck-security.conf`
+loads this environment file and overrides `ExecStart` to omit the vendor
+`--environ` option, preventing environment secrets from being logged at startup.
+Preserve this override during upgrades. Validate configuration with the service
+environment loaded; do not print the environment or expanded Caddy JSON.
+
+Previous configuration: `/etc/caddy/Caddyfile.pre-security-20260922`.
+Caddy was validated and reloaded before the patched auth service was deployed.
+Public requests from two actual clients used separate quota buckets, incoming
+spoofed assertions were overwritten, and direct Pi account requests returned
+403. Health/readiness probes remain exempt. Existing tracker routes and HAProxy
+were preserved. See the [release record](../../docs/ALPHA-RUNBOOK.md#security-release--2026-09-22).
 
 ## Terminal transport keep-alive
 

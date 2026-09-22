@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -68,6 +70,7 @@ type AuthConfig struct {
 	TokenExpiry   time.Duration `yaml:"token_expiry"`
 	SessionExpiry time.Duration `yaml:"session_expiry"`
 	BaseURL       string        `yaml:"base_url"`
+	ProxyToken    string        `yaml:"proxy_token"`
 	SecretKey     string        `yaml:"secret_key"`
 	BCryptCost    int           `yaml:"bcrypt_cost"`
 }
@@ -141,6 +144,7 @@ func LoadFromEnv() *Config {
 			SessionExpiry: time.Duration(getEnvInt("AUTH_SESSION_EXPIRY", 86400)) * time.Second,
 			BaseURL:       getEnvString("AUTH_BASE_URL", "http://localhost:8080"),
 			SecretKey:     os.Getenv("AUTH_SECRET_KEY"),
+			ProxyToken:    os.Getenv("AUTH_PROXY_TOKEN"),
 			BCryptCost:    getEnvInt("BCRYPT_COST", 12),
 		},
 		Mail: MailConfig{
@@ -170,8 +174,10 @@ func LoadFromEnv() *Config {
 
 // PostgreSQLConnectionString returns a formatted PostgreSQL connection string
 func (c *PostgreSQLConfig) ConnectionString() string {
-	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		c.Host, c.Port, c.Username, c.Password, c.Database, c.SSLMode)
+	u := &url.URL{Scheme: "postgres", User: url.UserPassword(c.Username, c.Password), Host: net.JoinHostPort(c.Host, strconv.Itoa(c.Port)), Path: "/" + c.Database}
+	q := url.Values{"sslmode": {c.SSLMode}}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // RedisAddress returns a formatted Redis address

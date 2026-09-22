@@ -8,6 +8,7 @@ import (
 
 // User represents a user account
 type User struct {
+	AuthVersion  int64                  `json:"-" db:"auth_version"`
 	ID           uuid.UUID              `json:"id" db:"id"`
 	Username     string                 `json:"username" db:"username"`
 	Email        string                 `json:"email" db:"email"`
@@ -118,6 +119,7 @@ type Auction struct {
 
 // Session represents a player session
 type Session struct {
+	AuthVersion  int64      `json:"auth_version"`
 	ID           string     `json:"id"`
 	CharacterID  uuid.UUID  `json:"character_id"`
 	UserID       uuid.UUID  `json:"user_id"`
