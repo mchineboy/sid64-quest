@@ -5,6 +5,33 @@ Deployment: `/srv/rck`, using `compose.edge.yml`. One persistent edge owns both
 terminal listeners; interchangeable blue/green cores share durable sessions.
 See [connection-preserving core deployments](BLUE-GREEN-DEPLOYMENTS.md).
 
+## Automated production release — 2026-09-22
+
+Current application release: **`v0.1.1`**, commit
+`06e27029bcebb5e13052d0bc0ddc3521d2270b92`, image `rck:v0.1.1`.
+Auth, edge, both core slots and the operator binary are updated; **core-green is
+active**. Image ID:
+`sha256:52b9468b0319f01d7c94c36bc5682dec693ef2698bdf3147f49d919e418ec71a`.
+
+Publishing the stable [GitHub Release](https://github.com/mchineboy/sid64-quest/releases/tag/v0.1.1)
+triggered the [successful production workflow](https://github.com/mchineboy/sid64-quest/actions/runs/35754388411).
+GitHub-hosted ARM64 tests/builds produced the artifact, and modeburner's systemd
+pull agent fetched it over outbound HTTPS. No Actions runner or deployment
+credential is installed in GitHub. The read-only status endpoint confirmed the
+exact version/commit after successful health checks. The earlier `v0.1.0` attempt
+was blocked by SSH ingress rules before any production change; those temporary
+SSH deployment credentials have been revoked and removed.
+
+The agent took and restore-tested `20260922T163222Z.dump` before deployment and
+`20260922T163339Z.dump` afterward (eight migrations, 83 rooms, four characters).
+All services are healthy and the original four accounts/characters remain.
+The edge binary changed and was replaced during this first automated release.
+The durable record is `/srv/rck/releases/v0.1.1/deployment.json`.
+
+See [production releases](RELEASING.md) for publishing, monitoring, pausing the
+agent, infrastructure changes and failure recovery. The records below describe
+earlier deployments; their active-slot/image statements are historical.
+
 ## Security release — 2026-09-22
 
 Auth, edge, both core slots, and the operator binary now use
