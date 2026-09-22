@@ -65,12 +65,7 @@ jobs:
           test "$(git rev-parse "refs/tags/$VERSION^{commit}")" = "$GITHUB_SHA"
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - name: Initialize disposable test database
-        env:
-          PGPASSWORD: ci-only-password
-        run: |
-          for migration in internal/database/migrations/*.sql; do
-            psql -h 127.0.0.1 -U mud_user -d race_condition_kingdom -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
-          done
+        run: go run ./deploy/release/ci-init.go
       - name: Build process-restart test binaries
         run: |
           mkdir -p build/integration
