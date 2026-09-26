@@ -76,7 +76,7 @@ The QR render was checked against the C64 character ROM and independently decode
 
 The website handles account administration; gameplay stays in the terminal.
 
-- Standalone signup and login, plus terminal-pairing signup.
+- Standalone signup and login, plus terminal-pairing signup. Usernames are stored in lowercase and accept any letter case at login; passwords remain case-sensitive.
 - Up to five characters per account, character creation and renaming.
 - Saved character location, health, stamina, and gold displayed on the account page.
 - Email updates and password changes with current-password verification.
