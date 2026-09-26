@@ -228,6 +228,9 @@ func (as *AuthService) MarkTokenUsed(token string) error {
 
 // AuthenticateUser authenticates a user with username and password
 func (as *AuthService) AuthenticateUser(username, password string) (*models.User, error) {
+	// Match registration normalization for browser, API, and terminal-pairing logins.
+	username = strings.ToLower(strings.TrimSpace(username))
+
 	query := `
 		SELECT id, username, email, password_hash, created_at, last_login, is_active, permissions, auth_version
 		FROM users 

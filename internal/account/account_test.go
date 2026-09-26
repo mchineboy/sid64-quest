@@ -136,9 +136,9 @@ func TestAccountJourneyAndOwnership(t *testing.T) {
 	}
 	h, _, _ := testHandler(t, db)
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
-	username := "web_" + suffix
+	username := "Web_" + suffix
 	email := username + "@example.test"
-	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM users WHERE username=$1`, username) })
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM users WHERE username=$1`, strings.ToLower(username)) })
 	cookie, s := start(t, h, "/signup")
 	// Letters only, distinct from game test names.
 	name := "Web " + strings.Map(func(r rune) rune {

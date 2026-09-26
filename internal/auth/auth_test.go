@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -284,4 +286,56 @@ func TestPairingChallengeCannotBeReplayed(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New(), 1))
 	require.Error(t, service.LinkTokenToSession(token, "replay-test", uuid.New(), uuid.New(), 1))
+}
+
+// Registration stores lowercase usernames; every login path must accept the
+// same spelling the player supplied at signup, without changing the password.
+func TestAuthenticateRegisteredUsernameCase(t *testing.T) {
+	cfg := config.LoadFromEnv()
+	cfg.Auth.BCryptCost = 4
+	db, err := sql.Open("postgres", cfg.Database.PostgreSQL.ConnectionString())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		t.Skipf("Postgres unavailable: %v", err)
+	}
+	service := newTestAuthService(t, cfg)
+	service.db = db
+	username := "IcePic_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	password := " CaseSensitive-123 "
+	user, character, err := service.RegisterPlayer(username, username+"@example.test", password, "Ice Pic")
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM users WHERE id=$1`, user.ID) })
+	require.Equal(t, strings.ToLower(username), user.Username)
+
+	for _, entered := range []string{username, strings.ToLower(username), strings.ToUpper(username), " " + username + " "} {
+		t.Run(entered, func(t *testing.T) {
+			loggedIn, err := service.AuthenticateUser(entered, password)
+			require.NoError(t, err)
+			require.Equal(t, user.ID, loggedIn.ID)
+			require.Equal(t, user.Username, loggedIn.Username)
+
+			// Complete the terminal pairing flow with the authenticated account.
+			sessionID := uuid.NewString()
+			token, _, err := service.GenerateAuthChallenge(sessionID)
+			require.NoError(t, err)
+			require.NoError(t, service.LinkTokenToSession(token, sessionID, loggedIn.ID, character.ID, loggedIn.AuthVersion))
+			session, err := service.GetSession(sessionID)
+			require.NoError(t, err)
+			require.Equal(t, user.ID, session.UserID)
+			require.Equal(t, character.ID, session.CharacterID)
+		})
+	}
+	for _, wrong := range []string{strings.ToLower(password), strings.TrimSpace(password), "wrong-password"} {
+		_, err := service.AuthenticateUser(username, wrong)
+		require.EqualError(t, err, "invalid username or password")
+	}
+	_, _, err = service.RegisterPlayer(strings.ToUpper(username), "duplicate-"+username+"@example.test", password, "Other Name")
+	require.Error(t, err)
+	_, err = db.Exec(`UPDATE users SET is_active=false WHERE id=$1`, user.ID)
+	require.NoError(t, err)
+	_, err = service.AuthenticateUser(username, password)
+	require.EqualError(t, err, "invalid username or password")
 }
